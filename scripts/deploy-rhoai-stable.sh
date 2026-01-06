@@ -312,6 +312,19 @@ metadata:
   name: maas-api
 EOF
 
+if kubectl get namespace opendatahub >/dev/null 2>&1; then
+  kubectl wait namespace/opendatahub --for=jsonpath='{.status.phase}'=Active --timeout=60s
+else
+  echo "* Waiting for opendatahub namespace to be created by the operator..."
+  for i in {1..30}; do
+    if kubectl get namespace opendatahub >/dev/null 2>&1; then
+      kubectl wait namespace/opendatahub --for=jsonpath='{.status.phase}'=Active --timeout=60s
+      break
+    fi
+    sleep 5
+  done
+fi
+
 : "${MAAS_REF:=main}"
 kubectl apply --server-side=true \
   -f <(kustomize build "https://github.com/opendatahub-io/models-as-a-service.git/deployment/overlays/openshift?ref=${MAAS_REF}" | \
