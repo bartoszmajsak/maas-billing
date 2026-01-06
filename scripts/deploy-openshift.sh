@@ -23,6 +23,9 @@ done
 # Load helper functions
 source "$(dirname "$0")/deployment-helpers.sh"
 
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 echo "========================================="
 echo "🚀 MaaS Platform OpenShift Deployment"
 echo "========================================="
@@ -47,6 +50,9 @@ echo ""
 echo "ℹ️  Note: OpenShift Service Mesh should be automatically installed when GatewayClass is created."
 echo "   If the Gateway gets stuck in 'Waiting for controller', you may need to manually"
 echo "   install the Red Hat OpenShift Service Mesh operator from OperatorHub."
+
+# Set custom MaaS API image if MAAS_API_IMAGE env var is provided
+set_maas_api_image
 
 echo ""
 echo "1️⃣ Checking OpenShift version and Gateway API requirements..."
@@ -77,8 +83,6 @@ echo "2️⃣ Creating namespaces..."
 echo "   ℹ️  Note: If ODH/RHOAI is already installed, some namespaces may already exist"
 
 # Determine MaaS API namespace: use MAAS_API_NAMESPACE env var if set, otherwise default to maas-api
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 MAAS_API_NAMESPACE=${MAAS_API_NAMESPACE:-maas-api}
 export MAAS_API_NAMESPACE
 echo "   MaaS API namespace: $MAAS_API_NAMESPACE (set MAAS_API_NAMESPACE env var to override)"

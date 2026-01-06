@@ -3,6 +3,53 @@
 # Deployment helper functions for MaaS Platform
 # Source this file in deployment scripts: source "$(dirname "$0")/deployment-helpers.sh"
 
+# find_project_root [start_dir] [marker]
+#   Walks up the directory tree to find the project root.
+#   Returns the path containing the marker (default: .git)
+find_project_root() {
+  local start_dir="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+  local marker="${2:-.git}"
+  local dir="$start_dir"
+
+  while [[ "$dir" != "/" && ! -e "$dir/$marker" ]]; do
+    dir="$(dirname "$dir")"
+  done
+
+  if [[ -e "$dir/$marker" ]]; then
+    printf '%s\n' "$dir"
+  else
+    echo "Error: couldn't find '$marker' in any parent of '$start_dir'" >&2
+    return 1
+  fi
+}
+
+# set_maas_api_image
+#   Sets the MaaS API container image in kustomization using MAAS_API_IMAGE env var.
+#   If MAAS_API_IMAGE is not set, does nothing (uses default from core/kustomization.yaml).
+#   Creates a backup and restores it after the calling script exits.
+#
+# Environment:
+#   MAAS_API_IMAGE - Container image to use (e.g., quay.io/opendatahub/maas-api:pr-123)
+set_maas_api_image() {
+  # Skip if MAAS_API_IMAGE is not set
+  if [ -z "${MAAS_API_IMAGE:-}" ]; then
+    return 0
+  fi
+
+  local project_root="$(find_project_root)"
+  local core_kustomization="$project_root/deployment/base/maas-api/core/kustomization.yaml"
+  local backup_file="${core_kustomization}.backup"
+
+  echo "   Setting MaaS API image: ${MAAS_API_IMAGE}"
+  
+  # Backup and set trap to restore on exit (use double quotes to expand paths now)
+  cp "$core_kustomization" "$backup_file"
+  trap "mv '$backup_file' '$core_kustomization' 2>/dev/null || true" EXIT INT TERM
+  
+  # Update the image
+  (cd "$(dirname "$core_kustomization")" && kustomize edit set image "maas-api=${MAAS_API_IMAGE}")
+}
+
 # Helper function to wait for CRD to be established
 wait_for_crd() {
   local crd="$1"

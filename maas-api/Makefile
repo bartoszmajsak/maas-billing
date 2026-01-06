@@ -93,7 +93,7 @@ define deploy
 	cd $(CORE_KUSTOMIZATION) && \
 		set -eu; \
 		cp kustomization.yaml kustomization.yaml.backup && \
-		trap 'mv kustomization.yaml.backup kustomization.yaml 2>/dev/null || true' EXIT INT TERM && \
+		trap 'mv $(CORE_KUSTOMIZATION)/kustomization.yaml.backup $(CORE_KUSTOMIZATION)/kustomization.yaml 2>/dev/null || true' EXIT INT TERM && \
 		kustomize edit set image maas-api=$(FULL_IMAGE) && \
 		cd $(PROJECT_DIR)/deploy/$(1) && \
 		$(if $(PRE_DEPLOY_STEP),$(PRE_DEPLOY_STEP) &&) \
