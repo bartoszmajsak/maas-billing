@@ -102,7 +102,8 @@ echo "3️⃣ Installing dependencies..."
 
 # Only clean up leftover CRDs if Kuadrant operators are NOT already installed
 echo "   Checking for existing Kuadrant installation..."
-if ! kubectl get csv -n kuadrant-system kuadrant-operator.v1.3.1 &>/dev/null 2>&1; then
+EXISTING_KUADRANT_CSV=$(find_csv_with_min_version "kuadrant-operator" "$KUADRANT_MIN_VERSION" "kuadrant-system" || echo "")
+if [ -z "$EXISTING_KUADRANT_CSV" ]; then
     echo "   No existing installation found, checking for leftover CRDs..."
     LEFTOVER_CRDS=$(kubectl get crd 2>/dev/null | grep -E "kuadrant|authorino|limitador" | awk '{print $1}')
     if [ -n "$LEFTOVER_CRDS" ]; then
@@ -111,7 +112,7 @@ if ! kubectl get csv -n kuadrant-system kuadrant-operator.v1.3.1 &>/dev/null 2>&
         sleep 5  # Brief wait for cleanup to complete
     fi
 else
-    echo "   ✅ Kuadrant operator already installed, skipping CRD cleanup"
+    echo "   ✅ Kuadrant operator already installed ($EXISTING_KUADRANT_CSV), skipping CRD cleanup"
 fi
 
 echo "   Installing Kuadrant..."
@@ -217,16 +218,16 @@ fi
 echo ""
 echo "6️⃣ Waiting for Kuadrant operators to be installed by OLM..."
 # Wait for CSVs to reach Succeeded state (this ensures CRDs are created and deployments are ready)
-wait_for_csv "kuadrant-operator.v1.3.1" "kuadrant-system" 300 || \
+wait_for_csv_with_min_version "kuadrant-operator" "$KUADRANT_MIN_VERSION" "kuadrant-system" 300 || \
     echo "   ⚠️  Kuadrant operator CSV did not succeed, continuing anyway..."
 
-wait_for_csv "authorino-operator.v0.22.0" "kuadrant-system" 60 || \
+wait_for_csv_with_min_version "authorino-operator" "$AUTHORINO_MIN_VERSION" "kuadrant-system" 60 || \
     echo "   ⚠️  Authorino operator CSV did not succeed"
 
-wait_for_csv "limitador-operator.v0.16.0" "kuadrant-system" 60 || \
+wait_for_csv_with_min_version "limitador-operator" "$LIMITADOR_MIN_VERSION" "kuadrant-system" 60 || \
     echo "   ⚠️  Limitador operator CSV did not succeed"
 
-wait_for_csv "dns-operator.v0.15.0" "kuadrant-system" 60 || \
+wait_for_csv_with_min_version "dns-operator" "$DNS_OPERATOR_MIN_VERSION" "kuadrant-system" 60 || \
     echo "   ⚠️  DNS operator CSV did not succeed"
 
 # Verify CRDs are present
