@@ -7,6 +7,12 @@ set -e
 
 ENABLE_TLS_BACKEND=1
 
+# Respect INSECURE_HTTP env var (used by test scripts)
+# This provides consistency with prow_run_smoke_test.sh and smoke.sh
+if [[ "${INSECURE_HTTP:-}" == "true" ]]; then
+  ENABLE_TLS_BACKEND=0
+fi
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --insecure)
