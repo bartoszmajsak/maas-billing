@@ -91,7 +91,7 @@ deploy_maas_platform() {
     # Set custom MaaS API image
     : "${MAAS_API_IMAGE:=quay.io/opendatahub/maas-api:latest}"
     echo "Using custom MaaS API image: ${MAAS_API_IMAGE}"
-    pushd "$PROJECT_ROOT/deployment/base/maas-api" > /dev/null
+    pushd "$PROJECT_ROOT/deployment/base/maas-api/core" > /dev/null
     kustomize edit set image maas-api="${MAAS_API_IMAGE}"
     popd > /dev/null
 
