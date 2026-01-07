@@ -9,6 +9,77 @@ export AUTHORINO_MIN_VERSION="0.22.0"
 export LIMITADOR_MIN_VERSION="0.16.0"
 export DNS_OPERATOR_MIN_VERSION="0.15.0"
 
+# find_project_root [start_dir] [marker]
+#   Walks up the directory tree to find the project root.
+#   Returns the path containing the marker (default: .git)
+find_project_root() {
+  local start_dir="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+  local marker="${2:-.git}"
+  local dir="$start_dir"
+
+  while [[ "$dir" != "/" && ! -e "$dir/$marker" ]]; do
+    dir="$(dirname "$dir")"
+  done
+
+  if [[ -e "$dir/$marker" ]]; then
+    printf '%s\n' "$dir"
+  else
+    echo "Error: couldn't find '$marker' in any parent of '$start_dir'" >&2
+    return 1
+  fi
+}
+
+# set_maas_api_image
+#   Sets the MaaS API container image in kustomization using MAAS_API_IMAGE env var.
+#   If MAAS_API_IMAGE is not set, does nothing (uses default from kustomization.yaml).
+#   Creates a backup that must be restored by calling cleanup_maas_api_image.
+#
+# Environment:
+#   MAAS_API_IMAGE - Container image to use (e.g., quay.io/opendatahub/maas-api:pr-123)
+#
+# Usage:
+#   set_maas_api_image
+#   trap cleanup_maas_api_image EXIT INT TERM
+#   # ... do deployment ...
+set_maas_api_image() {
+  # Skip if MAAS_API_IMAGE is not set
+  if [ -z "${MAAS_API_IMAGE:-}" ]; then
+    return 0
+  fi
+
+  local project_root
+  project_root="$(find_project_root)" || {
+    echo "Error: failed to find project root" >&2
+    return 1
+  }
+
+  # Exported so cleanup_maas_api_image can access them
+  export _MAAS_API_KUSTOMIZATION="$project_root/deployment/base/maas-api/kustomization.yaml"
+  export _MAAS_API_BACKUP="${_MAAS_API_KUSTOMIZATION}.backup"
+
+  echo "   Setting MaaS API image: ${MAAS_API_IMAGE}"
+  
+  cp "$_MAAS_API_KUSTOMIZATION" "$_MAAS_API_BACKUP" || {
+    echo "Error: failed to create backup of kustomization.yaml" >&2
+    return 1
+  }
+  
+  (cd "$(dirname "$_MAAS_API_KUSTOMIZATION")" && kustomize edit set image "maas-api=${MAAS_API_IMAGE}") || {
+    echo "Error: failed to set image in kustomization.yaml" >&2
+    mv -f "$_MAAS_API_BACKUP" "$_MAAS_API_KUSTOMIZATION" 2>/dev/null || true
+    return 1
+  }
+}
+
+# cleanup_maas_api_image
+#   Restores the original kustomization.yaml from backup.
+#   Safe to call even if set_maas_api_image was not called or MAAS_API_IMAGE was not set.
+cleanup_maas_api_image() {
+  if [ -n "${_MAAS_API_BACKUP:-}" ] && [ -f "$_MAAS_API_BACKUP" ]; then
+    mv -f "$_MAAS_API_BACKUP" "$_MAAS_API_KUSTOMIZATION" 2>/dev/null || true
+  fi
+}
+
 # Helper function to wait for CRD to be established
 wait_for_crd() {
   local crd="$1"
