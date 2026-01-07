@@ -85,7 +85,7 @@ include container.mk
 
 ## Deployment
 
-PRE_DEPLOY_STEP ?=
+PRE_DEPLOY_STEP ?=                                                                                                                      
 CORE_KUSTOMIZATION := $(abspath $(PROJECT_DIR)/../deployment/base/maas-api/core)
 
 define deploy

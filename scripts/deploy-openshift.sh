@@ -5,6 +5,11 @@
 
 set -e
 
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+source "$SCRIPT_DIR/deployment-helpers.sh"
+
 ENABLE_TLS_BACKEND=1
 
 # Respect INSECURE_HTTP env var (used by test scripts)
@@ -26,11 +31,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Load helper functions
-source "$(dirname "$0")/deployment-helpers.sh"
 
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 echo "========================================="
 echo "🚀 MaaS Platform OpenShift Deployment"
@@ -58,6 +59,7 @@ echo "   If the Gateway gets stuck in 'Waiting for controller', you may need to 
 echo "   install the Red Hat OpenShift Service Mesh operator from OperatorHub."
 
 # Set custom MaaS API image if MAAS_API_IMAGE env var is provided
+trap 'cleanup_maas_api_image' EXIT INT TERM
 set_maas_api_image
 
 echo ""
@@ -272,7 +274,7 @@ if [[ "$ENABLE_TLS_BACKEND" -eq 0 ]]; then
   OVERLAY="overlays/http-backend"
   echo "   ⚠️  TLS disabled, applying HTTP backend overlay..."
 else
-  echo "   Applying TLS backend overlay (maas-api + policies + Authorino TLS)..."
+  echo "   Applying TLS backend overlay..."
 fi
 
 # Build and apply with correct namespace
