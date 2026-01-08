@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -341,10 +342,8 @@ func (m *Manager) HasValidAudience(tokenString string) bool {
 	}
 
 	expected := m.Audience()
-	for _, a := range aud {
-		if a == expected {
-			return true
-		}
+	if slices.Contains(aud, expected) {
+		return true
 	}
 
 	m.logger.Debug("Token audience mismatch", "expected", expected, "actual", aud)

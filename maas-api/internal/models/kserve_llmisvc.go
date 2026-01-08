@@ -48,10 +48,7 @@ func (m *Manager) ListAvailableLLMs(ctx context.Context, saToken string) ([]Mode
 	}
 
 	// Convert to models first, then filter based on authorization
-	allModels, err := m.llmInferenceServicesToModels(instanceLLMs)
-	if err != nil {
-		return nil, err
-	}
+	allModels := m.llmInferenceServicesToModels(instanceLLMs)
 
 	// Filter models based on user authorization
 	var authorizedModels []Model
@@ -86,10 +83,12 @@ func (m *Manager) userCanAccessModel(ctx context.Context, model Model, saToken s
 	}
 
 	var lastResult authResult
-	_ = wait.ExponentialBackoffWithContext(ctx, backoff, func(ctx context.Context) (done bool, err error) {
+	if err := wait.ExponentialBackoffWithContext(ctx, backoff, func(ctx context.Context) (bool, error) {
 		lastResult = m.doAuthCheck(ctx, authCheckURL, saToken, model.ID)
 		return lastResult != authRetry, nil
-	})
+	}); err != nil {
+		m.logger.Debug("Authorization check backoff failed", "modelID", model.ID, "error", err)
+	}
 
 	return lastResult == authGranted
 }
@@ -173,7 +172,7 @@ func (m *Manager) partOfMaaSInstance(llmIsvc *kservev1alpha1.LLMInferenceService
 		m.hasManagedRouteAttachedToGateway(llmIsvc)
 }
 
-func (m *Manager) llmInferenceServicesToModels(items []*kservev1alpha1.LLMInferenceService) ([]Model, error) {
+func (m *Manager) llmInferenceServicesToModels(items []*kservev1alpha1.LLMInferenceService) []Model {
 	models := make([]Model, 0, len(items))
 
 	for _, item := range items {
@@ -203,7 +202,7 @@ func (m *Manager) llmInferenceServicesToModels(items []*kservev1alpha1.LLMInfere
 		})
 	}
 
-	return models, nil
+	return models
 }
 
 func (m *Manager) findLLMInferenceServiceURL(llmIsvc *kservev1alpha1.LLMInferenceService) *apis.URL {
