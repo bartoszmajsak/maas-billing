@@ -6,7 +6,7 @@ All Tekton file updates **must be made in the `konflux-central` repository**.
 
 ## ✅ How to Make Changes
 
-To modify the pipelines for `maas-billing` in the `rhoai-3.3` release:
+To modify the pipelines for `models-as-a-service` in the `rhoai-3.3` release:
 
 - Clone the [`konflux-central`](https://github.com/red-hat-data-services/konflux-central) repository.
 
@@ -24,7 +24,7 @@ git checkout rhoai-3.3
 - Navigate to the Tekton files for your component(s).
 
 ```bash
-cd pipelineruns/maas-billing/.tekton
+cd pipelineruns/models-as-a-service/.tekton
 ```
 
 - Make the required changes to the Tekton YAML files.
@@ -32,7 +32,7 @@ cd pipelineruns/maas-billing/.tekton
 - Commit and push your changes.
 
 ```bash
-git commit -am "Update pipelinerun for maas-billing (rhoai-3.3)"
+git commit -am "Update pipelinerun for models-as-a-service (rhoai-3.3)"
 git push origin rhoai-3.3
 ```
 
