@@ -50,10 +50,7 @@ func NewManager(
 }
 
 // GenerateToken creates a Service Account token in the namespace bound to the tier the user belongs to.
-func (m *Manager) GenerateToken(ctx context.Context, user *UserContext, expiration time.Duration, name string) (*Token, error) {
-	// name parameter is ignored - kept for interface compatibility
-	_ = name
-
+func (m *Manager) GenerateToken(ctx context.Context, user *UserContext, expiration time.Duration) (*Token, error) {
 	log := m.logger.WithFields(
 		"expiration", expiration.String(),
 	)
@@ -321,4 +318,48 @@ func generateLocalJTI() (string, error) {
 		return "", fmt.Errorf("failed to generate random bytes for JTI: %w", err)
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// Audience returns the expected service account token audience for this MaaS instance.
+func (m *Manager) Audience() string {
+	return m.tenantName + "-sa"
+}
+
+// HasValidAudience checks if the given JWT token has the expected service account audience.
+// Returns false if the token cannot be parsed or doesn't contain the expected audience.
+func (m *Manager) HasValidAudience(tokenString string) bool {
+	claims, err := extractClaims(tokenString)
+	if err != nil {
+		m.logger.Warn("Failed to extract claims from token", "error", err)
+		return false
+	}
+
+	aud, err := claims.GetAudience()
+	if err != nil {
+		m.logger.Warn("Failed to get audience from token claims", "error", err)
+		return false
+	}
+
+	expected := m.Audience()
+	for _, a := range aud {
+		if a == expected {
+			return true
+		}
+	}
+
+	m.logger.Debug("Token audience mismatch", "expected", expected, "actual", aud)
+	return false
+}
+
+// authCheckTokenTTL is the duration for short-lived tokens used in authorization checks.
+const authCheckTokenTTL = 10 * time.Minute
+
+// ExchangeForServiceAccountToken generates a short-lived SA token for authorization checks.
+// Used when the incoming token doesn't have the correct audience for model access verification.
+func (m *Manager) ExchangeForServiceAccountToken(ctx context.Context, user *UserContext) (string, error) {
+	token, err := m.GenerateToken(ctx, user, authCheckTokenTTL)
+	if err != nil {
+		return "", fmt.Errorf("token exchange failed: %w", err)
+	}
+	return token.Token, nil
 }

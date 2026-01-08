@@ -9,22 +9,25 @@ import (
 
 	"github.com/opendatahub-io/models-as-a-service/maas-api/internal/logger"
 	"github.com/opendatahub-io/models-as-a-service/maas-api/internal/models"
+	"github.com/opendatahub-io/models-as-a-service/maas-api/internal/token"
 )
 
 // ModelsHandler handles model-related endpoints.
 type ModelsHandler struct {
-	modelMgr *models.Manager
-	logger   *logger.Logger
+	modelMgr     *models.Manager
+	tokenManager *token.Manager
+	logger       *logger.Logger
 }
 
 // NewModelsHandler creates a new models handler.
-func NewModelsHandler(log *logger.Logger, modelMgr *models.Manager) *ModelsHandler {
+func NewModelsHandler(log *logger.Logger, modelMgr *models.Manager, tokenMgr *token.Manager) *ModelsHandler {
 	if log == nil {
 		log = logger.Production()
 	}
 	return &ModelsHandler{
-		modelMgr: modelMgr,
-		logger:   log,
+		modelMgr:     modelMgr,
+		tokenManager: tokenMgr,
+		logger:       log,
 	}
 }
 
@@ -47,7 +50,7 @@ func (h *ModelsHandler) ListModels(c *gin.Context) {
 
 // ListLLMs handles GET /v1/models.
 func (h *ModelsHandler) ListLLMs(c *gin.Context) {
-	// Extract service account token for authorization as recommended in PR feedback
+	// Extract authorization token from header
 	authHeader := c.GetHeader("Authorization")
 	if authHeader == "" {
 		h.logger.Error("Authorization header missing")
@@ -59,23 +62,61 @@ func (h *ModelsHandler) ListLLMs(c *gin.Context) {
 		return
 	}
 
-	// Use strings.TrimSpace and strings.CutPrefix as suggested in PR feedback
-	saToken := strings.TrimSpace(authHeader)
-	saToken, hasBearerPrefix := strings.CutPrefix(saToken, "Bearer ")
-	saToken = strings.TrimSpace(saToken)
+	bearerToken := strings.TrimSpace(authHeader)
+	bearerToken, _ = strings.CutPrefix(bearerToken, "Bearer ")
+	bearerToken = strings.TrimSpace(bearerToken)
 
-	// Validate token is non-empty after processing
-	if saToken == "" {
-		h.logger.Error("Empty token after processing authorization header",
-			"authHeader", authHeader,
-			"hasBearerPrefix", hasBearerPrefix,
-		)
+	if bearerToken == "" {
+		h.logger.Error("Empty token after processing authorization header")
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": gin.H{
 				"message": "Valid authorization token required",
 				"type":    "authentication_error",
 			}})
 		return
+	}
+
+	// Check if the token has the correct audience for model authorization checks.
+	// If not, exchange it for a proper service account token.
+	saToken := bearerToken
+	if !h.tokenManager.HasValidAudience(bearerToken) {
+		userCtx, exists := c.Get("user")
+		if !exists {
+			h.logger.Error("User context not found for token exchange")
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": gin.H{
+					"message": "Internal server error",
+					"type":    "server_error",
+				}})
+			return
+		}
+
+		user, ok := userCtx.(*token.UserContext)
+		if !ok {
+			h.logger.Error("Invalid user context type")
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": gin.H{
+					"message": "Internal server error",
+					"type":    "server_error",
+				}})
+			return
+		}
+
+		exchangedToken, err := h.tokenManager.ExchangeForServiceAccountToken(c.Request.Context(), user)
+		if err != nil {
+			h.logger.Error("Token exchange failed",
+				"error", err,
+			)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": gin.H{
+					"message": "Failed to authorize request",
+					"type":    "server_error",
+				}})
+			return
+		}
+
+		h.logger.Debug("Exchanged token for SA token with correct audience")
+		saToken = exchangedToken
 	}
 
 	modelList, err := h.modelMgr.ListAvailableLLMs(c.Request.Context(), saToken)
