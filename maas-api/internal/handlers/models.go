@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/openai/openai-go/v2/packages/pagination"
@@ -102,7 +103,7 @@ func (h *ModelsHandler) ListLLMs(c *gin.Context) {
 			return
 		}
 
-		exchangedToken, err := h.tokenManager.ExchangeForServiceAccountToken(c.Request.Context(), user)
+		exchangedToken, err := h.tokenManager.GenerateToken(c.Request.Context(), user, 10*time.Minute)
 		if err != nil {
 			h.logger.Error("Token exchange failed",
 				"error", err,
@@ -116,7 +117,7 @@ func (h *ModelsHandler) ListLLMs(c *gin.Context) {
 		}
 
 		h.logger.Debug("Exchanged token for SA token with correct audience")
-		saToken = exchangedToken
+		saToken = exchangedToken.Token
 	}
 
 	modelList, err := h.modelMgr.ListAvailableLLMs(c.Request.Context(), saToken)

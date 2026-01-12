@@ -349,16 +349,3 @@ func (m *Manager) HasValidAudience(tokenString string) bool {
 	m.logger.Debug("Token audience mismatch", "expected", expected, "actual", aud)
 	return false
 }
-
-// authCheckTokenTTL is the duration for short-lived tokens used in authorization checks.
-const authCheckTokenTTL = 10 * time.Minute
-
-// ExchangeForServiceAccountToken generates a short-lived SA token for authorization checks.
-// Used when the incoming token doesn't have the correct audience for model access verification.
-func (m *Manager) ExchangeForServiceAccountToken(ctx context.Context, user *UserContext) (string, error) {
-	token, err := m.GenerateToken(ctx, user, authCheckTokenTTL)
-	if err != nil {
-		return "", fmt.Errorf("token exchange failed: %w", err)
-	}
-	return token.Token, nil
-}
