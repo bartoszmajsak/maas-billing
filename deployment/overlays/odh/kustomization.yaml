@@ -73,6 +73,11 @@ replacements:
       name: gateway-auth-policy
     fieldPaths:
     - metadata.namespace
+  - select:
+      kind: DestinationRule
+      name: maas-api-backend-tls
+    fieldPaths:
+    - metadata.namespace
 - source:
     kind: ConfigMap
     version: v1
@@ -100,6 +105,14 @@ replacements:
       name: gateway-auth-policy
     fieldPaths:
     - spec.rules.metadata.matchedTier.http.url
+    options:
+      delimiter: "."
+      index: 1
+  - select:
+      kind: DestinationRule
+      name: maas-api-backend-tls
+    fieldPaths:
+    - spec.host
     options:
       delimiter: "."
       index: 1
