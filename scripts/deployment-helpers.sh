@@ -30,17 +30,23 @@ find_project_root() {
 #   Sets the MaaS API container image in kustomization using MAAS_API_IMAGE env var.
 #   If MAAS_API_IMAGE is not set, does nothing (uses default from kustomization.yaml).
 #   Creates a backup that must be restored by calling cleanup_maas_api_image.
+#   Idempotent: safe to call multiple times, only sets image on first call.
 #
 # Environment:
 #   MAAS_API_IMAGE - Container image to use (e.g., quay.io/opendatahub/maas-api:pr-123)
 #
 # Usage:
-#   set_maas_api_image
-#   trap cleanup_maas_api_image EXIT INT TERM
+#   trap cleanup_maas_api_image EXIT INT TERM  # Set trap FIRST
+#   set_maas_api_image                          # Then set image
 #   # ... do deployment ...
 set_maas_api_image() {
   # Skip if MAAS_API_IMAGE is not set
   if [ -z "${MAAS_API_IMAGE:-}" ]; then
+    return 0
+  fi
+
+  # Idempotent: skip if already set
+  if [ -n "${_MAAS_API_IMAGE_SET:-}" ]; then
     return 0
   fi
 
@@ -53,6 +59,7 @@ set_maas_api_image() {
   # Exported so cleanup_maas_api_image can access them
   export _MAAS_API_KUSTOMIZATION="$project_root/deployment/base/maas-api/core/kustomization.yaml"
   export _MAAS_API_BACKUP="${_MAAS_API_KUSTOMIZATION}.backup"
+  export _MAAS_API_IMAGE_SET=1
 
   echo "   Setting MaaS API image: ${MAAS_API_IMAGE}"
   

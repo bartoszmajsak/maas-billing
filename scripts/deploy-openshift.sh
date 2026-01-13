@@ -58,9 +58,8 @@ echo "ℹ️  Note: OpenShift Service Mesh should be automatically installed whe
 echo "   If the Gateway gets stuck in 'Waiting for controller', you may need to manually"
 echo "   install the Red Hat OpenShift Service Mesh operator from OperatorHub."
 
-# Set custom MaaS API image if MAAS_API_IMAGE env var is provided
+# Set up cleanup trap for custom MaaS API image (if MAAS_API_IMAGE is set)
 trap 'cleanup_maas_api_image' EXIT INT TERM
-set_maas_api_image
 
 echo ""
 echo "1️⃣ Checking OpenShift version and Gateway API requirements..."
@@ -268,6 +267,12 @@ kubectl wait --for=condition=Programmed gateway maas-default-gateway -n openshif
 echo ""
 echo "9️⃣ Deploying MaaS API and policies..."
 
+# Set custom image if MAAS_API_IMAGE is specified
+set_maas_api_image
+
+# Delete existing deployment to ensure clean state
+kubectl delete deployment maas-api -n "$MAAS_API_NAMESPACE" --ignore-not-found=true --wait=true --timeout=60s >/dev/null 2>&1 || true
+
 # Select overlay based on TLS mode (TLS is default)
 OVERLAY="overlays/tls-backend"
 if [[ "$ENABLE_TLS_BACKEND" -eq 0 ]]; then
@@ -283,24 +288,27 @@ fi
 kustomize build "$PROJECT_ROOT/deployment/$OVERLAY" \
   | sed "s/namespace: maas-api/namespace: ${MAAS_API_NAMESPACE}/g" \
   | sed "s/maas-api\.maas-api\.svc/maas-api.${MAAS_API_NAMESPACE}.svc/g" \
-  | kubectl apply --server-side=true --force-conflicts -f -
+  | kubectl apply --server-side=true --force-conflicts -f - || \
+  echo "   ⚠️  MaaS API deployment had issues, continuing..."
 
 # Configure Authorino TLS (patches operator-managed resources via kubectl)
 if [[ "$ENABLE_TLS_BACKEND" -eq 1 ]]; then
   echo "   Configuring Authorino for TLS..."
-  "$PROJECT_ROOT/deployment/overlays/tls-backend/configure-authorino-tls.sh"
+  "$PROJECT_ROOT/deployment/overlays/tls-backend/configure-authorino-tls.sh" 2>&1 || \
+    echo "   ⚠️  Authorino TLS configuration had issues (non-fatal)"
   
   echo "   Waiting for Authorino deployment to pick up TLS config..."
-  kubectl rollout status deployment/authorino -n kuadrant-system --timeout=120s || \
+  kubectl rollout status deployment/authorino -n kuadrant-system --timeout=120s 2>&1 || \
     echo "   ⚠️  Authorino rollout taking longer than expected, continuing..."
   
   # Restart maas-api to ensure it picks up Authorino TLS config
   echo "   Restarting MaaS API to pick up Authorino TLS configuration..."
-  kubectl rollout restart deployment/maas-api -n "$MAAS_API_NAMESPACE"
+  kubectl rollout restart deployment/maas-api -n "$MAAS_API_NAMESPACE" 2>&1 || \
+    echo "   ⚠️  Failed to restart maas-api deployment"
 fi
 
 echo "   Waiting for MaaS API deployment to be ready..."
-kubectl rollout status deployment/maas-api -n "$MAAS_API_NAMESPACE" --timeout=180s || \
+kubectl rollout status deployment/maas-api -n "$MAAS_API_NAMESPACE" --timeout=180s 2>&1 || \
   echo "   ⚠️  MaaS API rollout is taking longer than expected, continuing..."
 
 echo ""
