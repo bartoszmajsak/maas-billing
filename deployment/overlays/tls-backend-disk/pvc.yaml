@@ -2,6 +2,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: maas-api-data
+  namespace: maas-api
   labels:
     app.kubernetes.io/name: maas-api
     app.kubernetes.io/component: storage
@@ -11,4 +12,3 @@ spec:
   resources:
     requests:
       storage: 1Gi
-
