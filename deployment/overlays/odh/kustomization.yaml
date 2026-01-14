@@ -11,6 +11,7 @@ namespace: opendatahub
 resources:
   - ../../base/maas-api/overlays/tls  # maas-api with TLS (includes DestinationRule)
   - ../../base/policies/auth-policies  # Gateway auth policies only
+  - maas-authorino-networkpolicy.yaml
 
 configMapGenerator:
 - envs:

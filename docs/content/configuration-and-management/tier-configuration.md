@@ -123,6 +123,9 @@ This annotation automatically sets up the necessary RBAC (Role and RoleBinding) 
       apiGroup: rbac.authorization.k8s.io
     ```
 
+!!!info "Why the custom `post` verb?"
+    We intentionally use a custom verb (`post`) instead of standard Kubernetes verbs like `get` or `create`. This is the **only** RBAC permission required for model access. By using a non-standard verb that doesn't exist in Kubernetes' built-in authorization, we minimize the security surface - these service accounts cannot accidentally read, modify, or delete any cluster resources.
+
 ### 3. Configure Rate Limiting
 
 Add tier-specific rate limits by patching the existing `gateway-token-rate-limits` TokenRateLimitPolicy:
@@ -251,3 +254,10 @@ kubectl delete pod -l control-plane=controller-manager -n kuadrant-system
     - Rate limiting continuing at the old tier
     - Service Account persistence after group removal
     - Recommended practices for group membership changes
+
+!!!info "Model Tier Access Changes"
+    Removing a model from a tier's access list (by updating the `alpha.maas.opendatahub.io/tiers` annotation) takes effect immediately. See [Model Tier Access Behavior](./model-access-behavior.md#model-tier-access-changes-during-active-usage) for details on:
+
+    - Expected behaviors when access is revoked
+    - RBAC propagation timing
+    - Recommended practices for tier access changes
