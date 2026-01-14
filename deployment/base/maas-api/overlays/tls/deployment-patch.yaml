@@ -8,6 +8,8 @@ spec:
       containers:
       - name: maas-api
         env:
+        - name: SECURE
+          value: "true"
         - name: TLS_CERT
           value: /etc/maas-api/tls/tls.crt
         - name: TLS_KEY
