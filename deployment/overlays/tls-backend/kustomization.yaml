@@ -3,9 +3,8 @@ kind: Kustomization
 
 resources:
   - ../../base/maas-api/overlays/tls  
-  - ../../base/policies               
+  - ../../base/policies
   - service-ca-bundle.yaml
-  - envoyfilter-authorino-tls.yaml    
 
 patches:
   - target:

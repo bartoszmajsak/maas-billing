@@ -20,6 +20,12 @@ generatorOptions:
   disableNameSuffixHash: true
 
 patches:
+- target:
+    group: kuadrant.io
+    version: v1
+    kind: AuthPolicy
+    name: gateway-auth-policy
+  path: patches/authpolicy-https.yaml
 - patch: |-
     apiVersion: apps/v1
     kind: Deployment
