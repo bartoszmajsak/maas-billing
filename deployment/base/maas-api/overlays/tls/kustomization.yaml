@@ -8,3 +8,15 @@ resources:
 patches:
   - path: deployment-patch.yaml
   - path: service-patch.yaml
+  - target:
+      group: gateway.networking.k8s.io
+      version: v1
+      kind: HTTPRoute
+      name: maas-api-route
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/backendRefs/0/port
+        value: 8443
+      - op: replace
+        path: /spec/rules/1/backendRefs/0/port
+        value: 8443

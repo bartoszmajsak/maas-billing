@@ -15,6 +15,7 @@ spec:
         - name: TLS_KEY
           value: /etc/maas-api/tls/tls.key
         ports:
+        - $patch: replace
         - containerPort: 8443
           name: https
           protocol: TCP

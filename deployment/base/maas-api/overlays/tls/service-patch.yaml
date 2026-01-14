@@ -6,6 +6,7 @@ metadata:
     service.beta.openshift.io/serving-cert-secret-name: maas-api-serving-cert
 spec:
   ports:
+  - $patch: replace
   - name: https
     port: 8443
     protocol: TCP
