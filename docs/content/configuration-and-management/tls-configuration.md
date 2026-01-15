@@ -74,6 +74,33 @@ kubectl patch authorino authorino -n kuadrant-system --type=merge --patch '
 
 For more details, see the [ODH KServe TLS setup guide](https://github.com/opendatahub-io/kserve/tree/release-v0.15/docs/samples/llmisvc/ocp-setup-for-GA#ssl-authorino).
 
+##### Configuring the Gateway for Authorino TLS
+
+When TLS is enabled on Authorino's listener, the Gateway must be configured to trust Authorino's certificate. Without service mesh sidecars (the default for OpenShift Ingress), this requires an EnvoyFilter to configure the upstream TLS context.
+
+For MaaS gateways managed by the ODH Model Controller, use the `security.opendatahub.io/authorino-tls-bootstrap` annotation to enable automatic EnvoyFilter creation:
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: maas-default-gateway
+  namespace: openshift-ingress
+  annotations:
+    security.opendatahub.io/authorino-tls-bootstrap: "true"
+    opendatahub.io/managed: "false"  # Custom AuthPolicies managed externally
+spec:
+  # ... gateway spec ...
+```
+
+| Annotation | Description |
+|------------|-------------|
+| `security.opendatahub.io/authorino-tls-bootstrap` | When `"true"`, creates the EnvoyFilter for Gateway → Authorino TLS communication |
+| `opendatahub.io/managed` | When `"false"`, disables automatic AuthPolicy creation (for custom policy management) |
+
+!!! info "Interim solution"
+    This annotation is an interim solution until [CONNLINK-528](https://issues.redhat.com/browse/CONNLINK-528) ships native support for configuring TLS between the Gateway and Authorino without mesh sidecars. Previously, setting `opendatahub.io/managed=false` would skip both AuthPolicy and EnvoyFilter creation, leaving no way to configure Authorino TLS independently. The `authorino-tls-bootstrap` annotation decouples these concerns, allowing TLS configuration even when AuthPolicies are managed externally.
+
 #### Authorino → maas-api (Outbound TLS)
 
 Enables Authorino to make HTTPS calls to `maas-api` for tier metadata lookups. Requires the cluster CA bundle and SSL environment variables.
