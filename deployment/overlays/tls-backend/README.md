@@ -2,6 +2,14 @@
 
 Enables end-to-end TLS for maas-api using OpenShift serving certificates.
 
+## Contents
+
+| File | Purpose |
+|------|---------|
+| `kustomization.yaml` | References base TLS overlay and policies, applies HTTPS patches |
+| `configure-authorino-tls.sh` | Configures operator-managed Authorino for TLS |
+
+
 ## Traffic Flow
 
 **External (client → gateway → maas-api):**
@@ -34,8 +42,7 @@ kubectl rollout restart deployment/authorino -n kuadrant-system
 
 Authorino resources are managed by the Kuadrant operator. Kustomize can't patch them because they don't exist in our manifests; they're created by the operator. The script uses `kubectl patch` to configure TLS on the live resources.
 
-> [!IMPORTANT]
-> This overlay includes a `DestinationRule` for Istio TLS origination (gateway→maas-api). This is a workaround until Gateway API's `BackendTLSPolicy` (v1.4+) is officially supported in OpenShift.
+
 
 ## See also
 

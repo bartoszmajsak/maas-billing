@@ -38,7 +38,7 @@ Client → Gateway (TLS termination) → [DestinationRule] → maas-api:8443 (TL
 ### Standalone (maas-api with TLS only)
 
 ```bash
-kustomize build deployment/overlays/maas-api-tls | kubectl apply -f -
+kustomize build deployment/overlays/tls | kubectl apply -f -
 ```
 
 ### As part of full TLS backend

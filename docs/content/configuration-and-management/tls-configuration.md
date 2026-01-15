@@ -43,7 +43,7 @@ Authorino handles two TLS-protected traffic flows:
 
 For ODH/RHOAI deployments, the inbound flow is a [platform pre-requisite](https://github.com/opendatahub-io/kserve/tree/release-v0.15/docs/samples/llmisvc/ocp-setup-for-GA#ssl-authorino) for secure `LLMInferenceService` communication; only the outbound configuration is needed for MaaS. 
 
-For standalone deployments using `deploy-openshift.sh`, both flows are configured automatically.
+For standalone deployments using `deploy-openshift.sh`, both flows are configured automatically via `configure-authorino-tls.sh`.
 
 #### Gateway → Authorino (Listener TLS)
 
@@ -56,25 +56,20 @@ kubectl annotate service authorino-authorino-authorization \
   service.beta.openshift.io/serving-cert-secret-name=authorino-server-cert \
   --overwrite
 
-# Enable TLS listener
-kubectl apply -f - <<EOF
-apiVersion: operator.authorino.kuadrant.io/v1beta1
-kind: Authorino
-metadata:
-  name: authorino
-  namespace: kuadrant-system
-spec:
-  replicas: 1
-  clusterWide: true
-  listener:
-    tls:
-      enabled: true
-      certSecretRef:
-        name: authorino-server-cert
-  oidcServer:
-    tls:
-      enabled: false
-EOF
+# Patch Authorino CR to enable TLS listener
+kubectl patch authorino authorino -n kuadrant-system --type=merge --patch '
+{
+  "spec": {
+    "listener": {
+      "tls": {
+        "enabled": true,
+        "certSecretRef": {
+          "name": "authorino-server-cert"
+        }
+      }
+    }
+  }
+}'
 ```
 
 For more details, see the [ODH KServe TLS setup guide](https://github.com/opendatahub-io/kserve/tree/release-v0.15/docs/samples/llmisvc/ocp-setup-for-GA#ssl-authorino).
@@ -84,26 +79,28 @@ For more details, see the [ODH KServe TLS setup guide](https://github.com/openda
 Enables Authorino to make HTTPS calls to `maas-api` for tier metadata lookups. Requires the cluster CA bundle and SSL environment variables.
 
 ```bash
-# Create ConfigMap with CA bundle injection
-kubectl apply -f - <<EOF
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: service-ca-bundle
-  namespace: kuadrant-system
-  annotations:
-    service.beta.openshift.io/inject-cabundle: "true"
-data: {}
-EOF
-
 # Configure SSL environment variables for outbound HTTPS
+# Note: The Authorino CR doesn't support envVars, so we patch the deployment directly
 kubectl -n kuadrant-system set env deployment/authorino \
   SSL_CERT_FILE=/etc/ssl/certs/openshift-service-ca/service-ca-bundle.crt \
   REQUESTS_CA_BUNDLE=/etc/ssl/certs/openshift-service-ca/service-ca-bundle.crt
 ```
 
 !!! note
-    The `tls-backend` overlay includes this ConfigMap, and `deploy-openshift.sh` configures the volume mount on Authorino. OpenShift's service-ca-operator automatically populates the ConfigMap with the cluster CA certificate.
+    OpenShift's service-ca-operator automatically populates the ConfigMap with the cluster CA certificate.
+
+### Gateway → maas-api TLS (DestinationRule)
+
+The `tls` overlay includes a DestinationRule to configure TLS origination from the gateway to `maas-api`.
+
+**Why DestinationRule?** Gateway API's HTTPRoute doesn't tell Istio to use TLS when communicating with backends. Without [BackendTLSPolicy](https://gateway-api.sigs.k8s.io/api-types/backendtlspolicy/) (GA in Gateway API v1.4), an Istio-native DestinationRule is required to configure TLS origination.
+
+```
+Client → Gateway (TLS termination) → [DestinationRule] → maas-api:8443 (TLS origination)
+```
+
+!!! info "Future consideration"
+    Once Gateway API v1.4+ with BackendTLSPolicy is supported by the Istio Gateway provider, the DestinationRule can be replaced with a standard Gateway API resource.
 
 ## Custom maas-api TLS Configuration
 
@@ -149,9 +146,18 @@ Pre-configured overlays are available for common scenarios:
 
 | Overlay | Description |
 |---------|-------------|
-| `deployment/overlays/tls-backend` | TLS with OpenShift service-ca integration |
+| `deployment/base/maas-api/overlays/tls` | Base TLS overlay for maas-api (deployment patch, service annotation, DestinationRule) |
+| `deployment/overlays/tls-backend` | Full TLS deployment with Authorino configuration |
 | `deployment/overlays/tls-backend-disk` | TLS + persistent storage (PVC) |
 | `deployment/overlays/http-backend` | HTTP only (development/testing) |
+
+The `tls` base overlay includes:
+
+| Resource | Purpose |
+|----------|---------|
+| `deployment-patch.yaml` | Configure maas-api container for TLS |
+| `service-patch.yaml` | Add serving-cert annotation, expose port 8443 |
+| `destinationrule.yaml` | Configure gateway TLS to maas-api backend |
 
 Deploy using:
 

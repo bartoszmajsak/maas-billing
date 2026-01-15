@@ -21,12 +21,16 @@ generatorOptions:
   disableNameSuffixHash: true
 
 patches:
+# Set HTTPS URL for tier lookup; namespace is injected via replacements below
 - target:
     group: kuadrant.io
     version: v1
     kind: AuthPolicy
     name: gateway-auth-policy
-  path: patches/authpolicy-https.yaml
+  patch: |-
+    - op: replace
+      path: /spec/rules/metadata/matchedTier/http/url
+      value: https://maas-api.maas-api.svc.cluster.local:8443/v1/tiers/lookup
 - patch: |-
     apiVersion: apps/v1
     kind: Deployment

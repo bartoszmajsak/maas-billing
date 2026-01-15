@@ -29,21 +29,6 @@ kubectl patch authorino authorino -n "$NAMESPACE" --type=merge --patch '
           "name": "authorino-server-cert"
         }
       }
-    },
-    "volumes": {
-      "items": [
-        {
-          "name": "service-ca-bundle",
-          "mountPath": "/etc/ssl/certs/openshift-service-ca",
-          "configMaps": ["service-ca-bundle"],
-          "items": [
-            {
-              "key": "service-ca.crt",
-              "path": "service-ca-bundle.crt"
-            }
-          ]
-        }
-      ]
     }
   }
 }'
