@@ -15,6 +15,8 @@ import (
 
 const (
 	// Duration is the validity period for generated certificates (10 years).
+	// This extended period is intended for development and testing only.
+	// Production deployments should use externally managed certificates.
 	Duration = time.Hour * 24 * 365 * 10
 	// RenewalBuffer is the buffer before expiration for renewal (2 years).
 	RenewalBuffer = Duration / 5
