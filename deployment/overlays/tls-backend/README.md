@@ -42,8 +42,6 @@ kubectl rollout restart deployment/authorino -n kuadrant-system
 
 Authorino resources are managed by the Kuadrant operator. Kustomize can't patch them because they don't exist in our manifests; they're created by the operator. The script uses `kubectl patch` to configure TLS on the live resources.
 
-
-
 ## See also
 
 - [Securing Authorino for llm-d in RHOAI](https://github.com/opendatahub-io/kserve/tree/release-v0.15/docs/samples/llmisvc/ocp-setup-for-GA#ssl-authorino)
