@@ -26,6 +26,10 @@ import (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	cfg := config.Load()
 	flag.Parse()
 
@@ -37,7 +41,8 @@ func main() {
 	cfg.PrintDeprecationWarnings(appLogger)
 
 	if err := cfg.Validate(); err != nil {
-		appLogger.Fatal("Configuration validation failed", "error", err)
+		appLogger.Error("Configuration validation failed", "error", err)
+		return 1
 	}
 
 	gin.SetMode(gin.ReleaseMode)
@@ -62,10 +67,12 @@ func main() {
 	router.OPTIONS("/*path", func(c *gin.Context) { c.Status(204) })
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	store, err := initStore(ctx, appLogger, cfg)
 	if err != nil {
-		appLogger.Fatal("Failed to initialize token store", "error", err)
+		appLogger.Error("Failed to initialize token store", "error", err)
+		return 1
 	}
 	defer func() {
 		if err := store.Close(); err != nil {
@@ -73,34 +80,49 @@ func main() {
 		}
 	}()
 
-	registerHandlers(ctx, appLogger, router, cfg, store)
+	if err := registerHandlers(ctx, appLogger, router, cfg, store); err != nil {
+		appLogger.Error("Failed to register handlers", "error", err)
+		return 1
+	}
 
 	srv, err := newServer(cfg, router)
 	if err != nil {
-		appLogger.Fatal("Failed to create server", "error", err)
+		appLogger.Error("Failed to create server", "error", err)
+		return 1
 	}
 
+	// Channel to capture server startup errors from the goroutine
+	serverErr := make(chan error, 1)
 	go func() {
 		appLogger.Info("Server starting", "address", cfg.Address, "secure", cfg.Secure)
 		if err := listenAndServe(srv); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			appLogger.Fatal("Server failed to start", "error", err)
+			serverErr <- err
 		}
+		close(serverErr)
 	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	appLogger.Info("Shutdown signal received, shutting down server...")
 
-	cancel()
+	select {
+	case err := <-serverErr:
+		if err != nil {
+			appLogger.Error("Server failed to start", "error", err)
+			return 1
+		}
+	case <-quit:
+		appLogger.Info("Shutdown signal received, shutting down server...")
+	}
 
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancelShutdown()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		appLogger.Fatal("Server forced to shutdown", "error", err)
+		appLogger.Error("Server forced to shutdown", "error", err)
+		return 1
 	}
 
 	appLogger.Info("Server exited gracefully")
+	return 0
 }
 
 // initStore creates the store based on the configured storage mode.
@@ -139,16 +161,16 @@ func initStore(ctx context.Context, log *logger.Logger, cfg *config.Config) (api
 	}
 }
 
-func registerHandlers(ctx context.Context, log *logger.Logger, router *gin.Engine, cfg *config.Config, store api_keys.MetadataStore) {
+func registerHandlers(ctx context.Context, log *logger.Logger, router *gin.Engine, cfg *config.Config, store api_keys.MetadataStore) error {
 	router.GET("/health", handlers.NewHealthHandler().HealthCheck)
 
 	cluster, err := config.NewClusterConfig(cfg.Namespace, constant.DefaultResyncPeriod)
 	if err != nil {
-		log.Fatal("Failed to create cluster config", "error", err)
+		return fmt.Errorf("failed to create cluster config: %w", err)
 	}
 
 	if !cluster.StartAndWaitForSync(ctx.Done()) {
-		log.Fatal("Failed to sync informer caches")
+		return errors.New("failed to sync informer caches")
 	}
 
 	v1Routes := router.Group("/v1")
@@ -156,16 +178,15 @@ func registerHandlers(ctx context.Context, log *logger.Logger, router *gin.Engin
 	tierMapper := tier.NewMapper(log, cluster.ConfigMapLister, cfg.Name, cfg.Namespace)
 	v1Routes.POST("/tiers/lookup", tier.NewHandler(tierMapper).TierLookup)
 
-	modelMgr, errMgr := models.NewManager(
+	modelMgr, err := models.NewManager(
 		log,
 		cluster.InferenceServiceLister,
 		cluster.LLMInferenceServiceLister,
 		cluster.HTTPRouteLister,
 		models.GatewayRef{Name: cfg.GatewayName, Namespace: cfg.GatewayNamespace},
 	)
-
-	if errMgr != nil {
-		log.Fatal("Failed to create model manager", "error", errMgr)
+	if err != nil {
+		return fmt.Errorf("failed to create model manager: %w", err)
 	}
 
 	modelsHandler := handlers.NewModelsHandler(log, modelMgr)
@@ -193,4 +214,6 @@ func registerHandlers(ctx context.Context, log *logger.Logger, router *gin.Engin
 	apiKeyRoutes.POST("", apiKeyHandler.CreateAPIKey)
 	apiKeyRoutes.GET("", apiKeyHandler.ListAPIKeys)
 	apiKeyRoutes.GET("/:id", apiKeyHandler.GetAPIKey)
+
+	return nil
 }
