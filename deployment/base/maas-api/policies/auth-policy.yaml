@@ -10,17 +10,37 @@ spec:
   rules:
     # Allow any authenticated user to access the API
     authentication:
+      keycloak-jwt:
+        credentials:
+          authorizationHeader:
+            prefix: Bearer
+        jwt:
+          jwksUrl: https://keycloak.apps.ethan-kk-poc.sandbox3454.opentlc.com/realms/red-hat/protocol/openid-connect/certs
+        metrics: false
+        priority: 0
+        overrides:
+          username:
+            selector: auth.identity.preferred_username
+          groups:
+            selector: auth.identity.groups
       openshift-identities:
         kubernetesTokenReview:
           audiences:
             - https://kubernetes.default.svc
             - maas-default-gateway-sa
+        metrics: false
+        priority: 1
+        overrides:
+          username:
+            selector: auth.identity.user.username.@extract:{"sep":":","pos":3}
+          groups:
+            selector: auth.identity.user.groups
     response:
       success:
         headers:
-          X-MaaS-Username:
-            plain:
-              selector: auth.identity.user.username
           X-MaaS-Group:
             plain:
-              selector: auth.identity.user.groups.@tostr
+              selector: auth.identity.groups.@tostr
+          X-MaaS-Username:
+            plain:
+              selector: auth.identity.username

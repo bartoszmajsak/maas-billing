@@ -71,15 +71,21 @@ echo ""
 
 echo -e "${BLUE}Obtaining token from MaaS API...${NC}"
 
-OC_TOKEN=$(oc whoami -t 2>/dev/null)
-if [ -z "$OC_TOKEN" ]; then
-    echo -e "${RED}Failed to obtain OpenShift identity token!${NC}"
-    echo "Please ensure you are logged in: oc login"
-    exit 1
+if [ -z "${USER_TOKEN:-}" ]; then
+    USER_TOKEN=$(oc whoami -t 2>/dev/null)
+    if [ -z "$USER_TOKEN" ]; then
+        echo -e "${RED}Failed to obtain OpenShift identity token!${NC}"
+        echo "Please ensure you are logged in: oc login"
+        echo "Or set USER_TOKEN environment variable explicitly."
+        exit 1
+    fi
+    echo -e "${GREEN}✓ Using token from 'oc whoami -t'${NC}"
+else
+    echo -e "${GREEN}✓ Using provided USER_TOKEN${NC}"
 fi
 
 TOKEN_RESPONSE=$(curl -sSk \
-    -H "Authorization: Bearer $OC_TOKEN" \
+    -H "Authorization: Bearer $USER_TOKEN" \
     -H "Content-Type: application/json" \
     -X POST \
     -d '{"expiration": "1h"}' \
@@ -113,8 +119,13 @@ else
 fi
 
 echo -e "${BLUE}Discovering available models...${NC}"
+if [ -n "${LIST_TOKEN:-}" ]; then
+    echo -e "${YELLOW}Using custom token for model listing${NC}"
+else
+    LIST_TOKEN="$TOKEN"
+fi
 MODELS_RESPONSE=$(curl -sSk \
-    -H "Authorization: Bearer $TOKEN" \
+    -H "Authorization: Bearer $LIST_TOKEN" \
     -H "Content-Type: application/json" \
     -w "\nHTTP_STATUS:%{http_code}\n" \
     "${API_BASE}/maas-api/v1/models" 2>&1)
