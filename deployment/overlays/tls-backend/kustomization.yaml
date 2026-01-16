@@ -16,15 +16,4 @@ patches:
       - op: replace
         path: /spec/rules/metadata/matchedTier/http/url
         value: https://maas-api.maas-api.svc.cluster.local:8443/v1/tiers/lookup
-  - target:
-      group: gateway.networking.k8s.io
-      version: v1
-      kind: HTTPRoute
-      name: maas-api-route
-    patch: |-
-      - op: replace
-        path: /spec/rules/0/backendRefs/0/port
-        value: 8443
-      - op: replace
-        path: /spec/rules/1/backendRefs/0/port
-        value: 8443
+
