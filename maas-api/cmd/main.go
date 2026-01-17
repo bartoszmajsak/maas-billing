@@ -169,21 +169,16 @@ func registerHandlers(ctx context.Context, log *logger.Logger, router *gin.Engin
 	tierMapper := tier.NewMapper(log, cluster.ConfigMapLister, cfg.Name, cfg.Namespace)
 	v1Routes.POST("/tiers/lookup", tier.NewHandler(tierMapper).TierLookup)
 
-	modelMgr, errMgr := models.NewManager(
+	modelManager, err := models.NewManager(
 		log,
 		cluster.InferenceServiceLister,
 		cluster.LLMInferenceServiceLister,
 		cluster.HTTPRouteLister,
 		models.GatewayRef{Name: cfg.GatewayName, Namespace: cfg.GatewayNamespace},
 	)
-
-	if errMgr != nil {
-		log.Fatal("Failed to create model manager",
-			"error", errMgr,
-		)
+	if err != nil {
+		log.Fatal("Failed to create model manager", "error", err)
 	}
-
-	modelsHandler := handlers.NewModelsHandler(log, modelMgr)
 
 	tokenManager := token.NewManager(
 		log,
@@ -194,6 +189,8 @@ func registerHandlers(ctx context.Context, log *logger.Logger, router *gin.Engin
 		cluster.ServiceAccountLister,
 	)
 	tokenHandler := token.NewHandler(log, cfg.Name, tokenManager)
+
+	modelsHandler := handlers.NewModelsHandler(log, modelManager, tokenManager)
 
 	apiKeyService := api_keys.NewService(tokenManager, store)
 	apiKeyHandler := api_keys.NewHandler(log, apiKeyService)
