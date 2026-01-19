@@ -26,23 +26,28 @@ import (
 )
 
 func main() {
-	os.Exit(run())
+	if err := serve(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
 }
 
-func run() int {
+func serve() error {
 	cfg := config.Load()
 	flag.Parse()
 
-	appLogger := logger.New(cfg.DebugMode)
+	log := logger.New(cfg.DebugMode)
 	defer func() {
-		_ = appLogger.Sync()
+		if err := log.Sync(); err != nil {
+			// Can't use logger if sync failed
+			fmt.Fprintf(os.Stderr, "failed to sync logger: %v\n", err)
+		}
 	}()
 
-	cfg.PrintDeprecationWarnings(appLogger)
+	cfg.PrintDeprecationWarnings(log)
 
 	if err := cfg.Validate(); err != nil {
-		appLogger.Error("Configuration validation failed", "error", err)
-		return 1
+		return fmt.Errorf("configuration validation failed: %w", err)
 	}
 
 	gin.SetMode(gin.ReleaseMode)
@@ -69,35 +74,30 @@ func run() int {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	store, err := initStore(ctx, appLogger, cfg)
+	store, err := initStore(ctx, log, cfg)
 	if err != nil {
-		appLogger.Error("Failed to initialize token store", "error", err)
-		return 1
+		return fmt.Errorf("failed to initialize token store: %w", err)
 	}
 	defer func() {
 		if err := store.Close(); err != nil {
-			appLogger.Error("Failed to close token store", "error", err)
+			log.Error("Failed to close token store", "error", err)
 		}
 	}()
 
-	if err := registerHandlers(ctx, appLogger, router, cfg, store); err != nil {
-		appLogger.Error("Failed to register handlers", "error", err)
-		return 1
+	if err := registerHandlers(ctx, log, router, cfg, store); err != nil {
+		return fmt.Errorf("failed to register handlers: %w", err)
 	}
 
 	srv, err := newServer(cfg, router)
 	if err != nil {
-		appLogger.Error("Failed to create server", "error", err)
-		return 1
+		return fmt.Errorf("failed to create server: %w", err)
 	}
 
 	// Channel to capture server startup errors from the goroutine
 	serverErr := make(chan error, 1)
 	go func() {
-		appLogger.Info("Server starting", "address", cfg.Address, "secure", cfg.Secure)
-		if err := listenAndServe(srv); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			serverErr <- err
-		}
+		log.Info("Server starting", "address", cfg.Address, "secure", cfg.Secure)
+		serverErr <- listenAndServe(srv)
 		close(serverErr)
 	}()
 
@@ -106,23 +106,21 @@ func run() int {
 
 	select {
 	case err := <-serverErr:
-		if err != nil {
-			appLogger.Error("Server failed to start", "error", err)
-			return 1
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("server failed to start: %w", err)
 		}
 	case <-quit:
-		appLogger.Info("Shutdown signal received, shutting down server...")
+		log.Info("Shutdown signal received, shutting down server...")
 	}
 
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancelShutdown()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		appLogger.Error("Server forced to shutdown", "error", err)
-		return 1
+		return fmt.Errorf("server forced to shutdown: %w", err)
 	}
 
-	appLogger.Info("Server exited gracefully")
-	return 0
+	log.Info("Server exited gracefully")
+	return nil
 }
 
 // initStore creates the store based on the configured storage mode.
