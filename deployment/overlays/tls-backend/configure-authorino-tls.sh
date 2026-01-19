@@ -4,7 +4,6 @@
 #
 # Prerequisites:
 # - Authorino operator installed in kuadrant-system namespace
-# - service-ca-bundle ConfigMap exists (created by service-ca-bundle.yaml)
 
 set -euo pipefail
 
