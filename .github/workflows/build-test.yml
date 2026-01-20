@@ -27,4 +27,4 @@ jobs:
 
     - name: Validate Kustomize manifests
       run: |
-        ./scripts/validate-manifests.sh
+        ./scripts/ci/validate-manifests.sh
