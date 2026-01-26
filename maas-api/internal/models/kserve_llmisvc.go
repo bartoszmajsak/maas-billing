@@ -50,6 +50,9 @@ func NewManager(
 	httpRouteLister gatewaylisters.HTTPRouteLister,
 	gatewayRef GatewayRef,
 ) (*Manager, error) {
+	if log == nil {
+		return nil, errors.New("log is required")
+	}
 	if llmIsvcLister == nil {
 		return nil, errors.New("llmIsvcLister is required")
 	}
