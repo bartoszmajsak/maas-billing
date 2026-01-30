@@ -127,3 +127,17 @@ replacements:
     options:
       delimiter: "."
       index: 1
+# SA audience for maas-api AuthPolicy
+- source:
+    kind: ConfigMap
+    version: v1
+    name: maas-parameters
+    fieldPath: data.gateway-sa-audience
+  targets:
+  - select:
+      group: kuadrant.io
+      version: v1
+      kind: AuthPolicy
+      name: maas-api-auth-policy
+    fieldPaths:
+    - spec.rules.authentication.openshift-identities.kubernetesTokenReview.audiences.1

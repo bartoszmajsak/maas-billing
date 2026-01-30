@@ -1,0 +1,69 @@
+# OIDC Authentication Component
+# Adds Keycloak/OIDC JWT authentication to maas-api AuthPolicy
+#
+# Usage: Include this component in overlays that need OIDC support
+#   components:
+#     - ../../components/oidc-auth
+#
+# Required replacements in overlay:
+#   - keycloak-jwks-url → spec.rules.authentication.keycloak-jwt.jwt.jwksUrl
+#   - gateway-sa-audience → spec.rules.authentication.openshift-identities.kubernetesTokenReview.audiences.1
+
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+patches:
+# Add OIDC authentication and normalize identity fields
+- target:
+    group: kuadrant.io
+    version: v1
+    kind: AuthPolicy
+    name: maas-api-auth-policy
+  patch: |-
+    - op: add
+      path: /spec/rules/authentication/keycloak-jwt
+      value:
+        credentials:
+          authorizationHeader:
+            prefix: Bearer
+        jwt:
+          jwksUrl: PLACEHOLDER_JWKS_URL
+        metrics: false
+        priority: 0
+        overrides:
+          username:
+            selector: auth.identity.preferred_username
+          groups:
+            selector: auth.identity.groups
+    # Set SA auth to lower priority (OIDC takes precedence)
+    - op: add
+      path: /spec/rules/authentication/openshift-identities/priority
+      value: 1
+    # Normalize SA identity fields to match OIDC format
+    - op: add
+      path: /spec/rules/authentication/openshift-identities/overrides
+      value:
+        username:
+          selector: auth.identity.user.username.@extract:{"sep":":","pos":3}
+        groups:
+          selector: auth.identity.user.groups
+    # Update response headers to use normalized identity
+    - op: replace
+      path: /spec/rules/response/success/headers/X-MaaS-Username/plain/selector
+      value: auth.identity.username
+    - op: replace
+      path: /spec/rules/response/success/headers/X-MaaS-Group/plain/selector
+      value: auth.identity.groups.@tostr
+    # Add metrics: false to response headers
+    - op: add
+      path: /spec/rules/response/success/headers/X-MaaS-Username/metrics
+      value: false
+    - op: add
+      path: /spec/rules/response/success/headers/X-MaaS-Username/priority
+      value: 0
+    - op: add
+      path: /spec/rules/response/success/headers/X-MaaS-Group/metrics
+      value: false
+    - op: add
+      path: /spec/rules/response/success/headers/X-MaaS-Group/priority
+      value: 0
