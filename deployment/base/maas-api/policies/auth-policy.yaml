@@ -9,6 +9,7 @@ spec:
     name: maas-api-route
   rules:
     # Allow any authenticated user to access the API
+    # For OIDC support, include the oidc-auth component
     authentication:
       openshift-identities:
         kubernetesTokenReview:

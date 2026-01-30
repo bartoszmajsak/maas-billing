@@ -1,0 +1,32 @@
+# ODH overlay with OIDC authentication support
+#
+# Extends the base ODH overlay by adding Keycloak/OIDC JWT authentication.
+# Use this overlay when OIDC authentication is configured in the ModelsAsService CR.
+#
+# Additional params.env entries required (set by operator):
+#   - keycloak-jwks-url: OIDC JWKS endpoint for token validation
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../odh  # Inherit everything from base ODH overlay
+
+components:
+  - ../../components/oidc-auth  # Add OIDC JWT authentication
+
+# OIDC-specific replacement for JWKS URL
+replacements:
+  - source:
+      kind: ConfigMap
+      version: v1
+      name: maas-parameters
+      fieldPath: data.keycloak-jwks-url
+    targets:
+      - select:
+          group: kuadrant.io
+          version: v1
+          kind: AuthPolicy
+          name: maas-api-auth-policy
+        fieldPaths:
+          - spec.rules.authentication.keycloak-jwt.jwt.jwksUrl
