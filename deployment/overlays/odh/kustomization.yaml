@@ -42,6 +42,11 @@ patches:
           containers:
           - name: maas-api
             env:
+            - name: INSTANCE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  key: instance-name
+                  name: maas-parameters
             - name: GATEWAY_NAMESPACE
               valueFrom:
                 configMapKeyRef:
