@@ -77,9 +77,17 @@ kubectl get pods -n kserve
 kubectl get pods -n redhat-ods-applications
 ```
 
-## Model Setup (Optional)
+!!! tip "TLS Configuration"
+    TLS is enabled by default. See [TLS Configuration](configuration-and-management/tls-configuration.md) for details.
 
-### Deploy Sample Models (Optional)
+For detailed validation and troubleshooting, see the [Validation Guide](install/validation.md).
+
+## Model Setup
+
+!!! note
+    At least one model must be deployed to validate the installation using the [Validation Guide](install/validation.md).
+
+### Deploy Sample Models
 
 #### Simulator Model (CPU)
 
