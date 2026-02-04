@@ -14,6 +14,7 @@ This guide provides quickstart instructions for deploying the MaaS Platform infr
       - ODH 3.0 +
 - **RHCL requirements** (Note: This can be installed automatically by the script below):
       - RHCL 1.2 +
+- **Authorino TLS**: Listener TLS must be enabled on Authorino (see [Configure Authorino TLS](#configure-authorino-tls) below)
 - **Cluster admin** or equivalent permissions
 - **Required tools**:
       - `oc` (OpenShift CLI)
@@ -21,6 +22,68 @@ This guide provides quickstart instructions for deploying the MaaS Platform infr
       - `jq`
       - `kustomize` (v5.7.0+)
       - `gsed` (GNU sed) - **macOS only**: `brew install gnu-sed`
+
+## Configure Authorino TLS
+
+Before deploying MaaS, Authorino must be configured to handle TLS-protected traffic. This involves two configurations:
+
+### Gateway → Authorino (Listener TLS)
+
+Enable TLS on Authorino's gRPC listener for incoming authentication requests from the Gateway:
+
+```bash
+# Annotate service for certificate generation
+kubectl annotate service authorino-authorino-authorization \
+  -n kuadrant-system \
+  service.beta.openshift.io/serving-cert-secret-name=authorino-server-cert \
+  --overwrite
+
+# Patch Authorino CR to enable TLS listener
+kubectl patch authorino authorino -n kuadrant-system --type=merge --patch '
+{
+  "spec": {
+    "listener": {
+      "tls": {
+        "enabled": true,
+        "certSecretRef": {
+          "name": "authorino-server-cert"
+        }
+      }
+    }
+  }
+}'
+```
+
+For more details, see the [ODH KServe TLS setup guide](https://github.com/opendatahub-io/kserve/tree/release-v0.15/docs/samples/llmisvc/ocp-setup-for-GA#ssl-authorino).
+
+### Gateway TLS Bootstrap Annotation
+
+When TLS is enabled on Authorino's listener, the Gateway must be configured to trust Authorino's certificate. Add the `security.opendatahub.io/authorino-tls-bootstrap` annotation to enable automatic TLS configuration:
+
+```bash
+kubectl annotate gateway maas-default-gateway -n openshift-ingress \
+  security.opendatahub.io/authorino-tls-bootstrap="true" \
+  --overwrite
+```
+
+!!! info "Interim solution"
+    This annotation is an interim solution until [CONNLINK-528](https://issues.redhat.com/browse/CONNLINK-528) ships native support for configuring TLS between the Gateway and Authorino without mesh sidecars.
+
+### Authorino → maas-api (Outbound TLS)
+
+Configure Authorino to make HTTPS calls to `maas-api` for tier metadata lookups:
+
+```bash
+# Configure SSL environment variables for outbound HTTPS
+kubectl -n kuadrant-system set env deployment/authorino \
+  SSL_CERT_FILE=/etc/ssl/certs/openshift-service-ca/service-ca-bundle.crt \
+  REQUESTS_CA_BUNDLE=/etc/ssl/certs/openshift-service-ca/service-ca-bundle.crt
+```
+
+!!! note
+    OpenShift's service-ca-operator automatically populates the ConfigMap with the cluster CA certificate.
+
+For complete TLS configuration options, see [TLS Configuration](configuration-and-management/tls-configuration.md).
 
 ## Quick Start
 
@@ -79,7 +142,7 @@ kubectl get pods -n redhat-ods-applications
 
 ## Model Setup (Optional)
 
-### Deploy Sample Models (Optional)
+### Deploy Sample Models
 
 #### Simulator Model (CPU)
 
