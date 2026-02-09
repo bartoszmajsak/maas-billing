@@ -1323,10 +1323,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#labels-via-telemetrypolicy" class="md-nav__link">
+  <a href="#tier-based-metrics" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Labels via TelemetryPolicy
+        Tier-Based Metrics
       
     </span>
   </a>
@@ -1394,22 +1394,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#visualization" class="md-nav__link">
+  <a href="#grafana-dashboards" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Visualization
+        Grafana Dashboards
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Visualization">
+    <nav class="md-nav" aria-label="Grafana Dashboards">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#sample-dashboard" class="md-nav__link">
+  <a href="#maas-platform-overview-dashboard" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Sample Dashboard
+        MaaS Platform Overview Dashboard
       
     </span>
   </a>
@@ -1453,6 +1453,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Latency Metrics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#per-user-latency-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-User Latency Tracking
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -1488,6 +1505,17 @@
     <span class="md-ellipsis">
       
         Currently Blocked Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#available-per-user-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Available Per-User Metrics
       
     </span>
   </a>
@@ -1752,10 +1780,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#labels-via-telemetrypolicy" class="md-nav__link">
+  <a href="#tier-based-metrics" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Labels via TelemetryPolicy
+        Tier-Based Metrics
       
     </span>
   </a>
@@ -1823,22 +1851,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#visualization" class="md-nav__link">
+  <a href="#grafana-dashboards" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Visualization
+        Grafana Dashboards
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Visualization">
+    <nav class="md-nav" aria-label="Grafana Dashboards">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#sample-dashboard" class="md-nav__link">
+  <a href="#maas-platform-overview-dashboard" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Sample Dashboard
+        MaaS Platform Overview Dashboard
       
     </span>
   </a>
@@ -1882,6 +1910,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Latency Metrics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#per-user-latency-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-User Latency Tracking
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -1923,6 +1968,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#available-per-user-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Available Per-User Metrics
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1953,15 +2009,14 @@
 <div class="admonition warning">
 <p class="admonition-title">Important</p>
 <p><a href="https://docs.redhat.com/en/documentation/monitoring_stack_for_red_hat_openshift/4.20/html-single/configuring_user_workload_monitoring/index#enabling-monitoring-for-user-defined-projects_preparing-to-configure-the-monitoring-stack-uwm">User Workload Monitoring</a> must be enabled in order to collect metrics.</p>
-<p>Add <code>enableUserWorkload: true</code> to the <code>cluster-monitoring-config</code> in the <code>openshift-monitoring</code> namespace. See <a href="https://github.com/opendatahub-io/models-as-a-service/blob/main/docs/samples/observability/cluster-monitoring-config.yaml">cluster-monitoring-config.yaml</a> for an example.</p>
+<p>Add <code>enableUserWorkload: true</code> to the <code>cluster-monitoring-config</code> in the <code>openshift-monitoring</code> namespace</p>
 </div>
 <h2 id="overview">Overview</h2>
-<p>As part of Dev Preview, MaaS Platform includes a basic observability stack that provides insights into system performance, usage patterns, and operational health.</p>
+<p>As part of Dev Preview MaaS Platform includes a basic observability stack that provides insights into system performance, usage patterns, and operational health. The observability stack consists of:</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>The observability stack will be enhanced in future releases.</p>
 </div>
-<p>The observability stack consists of:</p>
+<p>The observability stack will be enhanced in the future.</p>
 <ul>
 <li><strong>Limitador</strong>: Rate limiting service that exposes metrics</li>
 <li><strong>Prometheus</strong>: Metrics collection and storage (uses OpenShift platform Prometheus)</li>
@@ -1973,14 +2028,11 @@
 <p>Limitador exposes several key metrics that are collected through a ServiceMonitor by Prometheus:</p>
 <h4 id="rate-limiting-metrics">Rate Limiting Metrics</h4>
 <ul>
-<li><code>authorized_hits</code>: Total tokens consumed for authorized requests (extracted from <code>usage.total_tokens</code> in model responses)</li>
-<li><code>authorized_calls</code>: Number of requests allowed</li>
-<li><code>limited_calls</code>: Number of requests denied due to rate limiting</li>
+<li><code>limitador_ratelimit_requests_total</code>: Total number of rate limit requests</li>
+<li><code>limitador_ratelimit_allowed_total</code>: Number of requests allowed</li>
+<li><code>limitador_ratelimit_denied_total</code>: Number of requests denied</li>
+<li><code>limitador_ratelimit_errors_total</code>: Number of rate limiting errors</li>
 </ul>
-<div class="admonition info">
-<p class="admonition-title">Token vs Request Metrics</p>
-<p>With <code>TokenRateLimitPolicy</code>, <code>authorized_hits</code> tracks <strong>token consumption</strong> (extracted from LLM response bodies), not request counts. Use <code>authorized_calls</code> for request counts.</p>
-</div>
 <h4 id="performance-metrics">Performance Metrics</h4>
 <ul>
 <li><code>limitador_ratelimit_duration_seconds</code>: Duration of rate limit checks</li>
@@ -1988,12 +2040,11 @@
 <li><code>limitador_ratelimit_cache_hits_total</code>: Cache hit rate</li>
 <li><code>limitador_ratelimit_cache_misses_total</code>: Cache miss rate</li>
 </ul>
-<h4 id="labels-via-telemetrypolicy">Labels via TelemetryPolicy</h4>
-<p>The TelemetryPolicy adds these labels to Limitador metrics:</p>
+<h4 id="tier-based-metrics">Tier-Based Metrics</h4>
 <ul>
-<li><code>user</code>: User identifier (extracted from <code>auth.identity.userid</code>)</li>
-<li><code>tier</code>: User tier (extracted from <code>auth.identity.tier</code>)</li>
-<li><code>model</code>: Model name (extracted from request path)</li>
+<li><code>limitador_ratelimit_tier_requests_total</code>: Requests per tier</li>
+<li><code>limitador_ratelimit_tier_allowed_total</code>: Allowed requests per tier</li>
+<li><code>limitador_ratelimit_tier_denied_total</code>: Denied requests per tier</li>
 </ul>
 <h3 id="servicemonitor-configuration">ServiceMonitor Configuration</h3>
 <p>ServiceMonitors are automatically deployed as part of <code>deploy-openshift.sh</code> to configure OpenShift's Prometheus to discover and scrape metrics from MaaS components.</p>
@@ -2046,18 +2097,15 @@ spec:
 <li>Limitador custom resource updates</li>
 <li>Production-ready setup instructions</li>
 </ul>
-<p>For local development and testing, you can also use our <a href="../limitador-persistence/">Limitador Persistence</a> guide which includes a basic Redis setup script.</p>
-<h2 id="visualization">Visualization</h2>
-<p>For dashboard visualization, refer to the official documentation:</p>
-<ul>
-<li><strong>OpenShift Monitoring</strong>: <a href="https://docs.redhat.com/en/documentation/openshift_container_platform/4.19/html/monitoring/index">Monitoring overview</a></li>
-<li><strong>Grafana</strong>: <a href="https://grafana.com/docs/grafana/latest/">Grafana Documentation</a></li>
-</ul>
-<h3 id="sample-dashboard">Sample Dashboard</h3>
-<p>A sample Grafana dashboard for token metrics is available:</p>
-<ul>
-<li><a href="https://github.com/opendatahub-io/models-as-a-service/blob/main/docs/samples/dashboards/maas-token-metrics-dashboard.json">MaaS Token Metrics Dashboard</a></li>
-</ul>
+<p>For local development and testing, you can also use our <a href="../limitador-persistence/">Limitador Persistence</a> guide which includes a basic Redis setup script that works with any Kubernetes cluster.</p>
+<h2 id="grafana-dashboards">Grafana Dashboards</h2>
+<h3 id="maas-platform-overview-dashboard">MaaS Platform Overview Dashboard</h3>
+<p>We are providing a basic dashboard for the MaaS Platform that can be used to get a quick
+overview of the system. Its definition can be found and imported from the following 
+link:
+<a href="https://github.com/opendatahub-io/models-as-a-service/blob/main/docs/samples/dashboards/maas-token-metrics-dashboard.json">maas-token-metrics-dashboard.json</a></p>
+<p>See more detailed description of the Grafana Dashboard in <a href="https://github.com/opendatahub-io/models-as-a-service/tree/main/docs/samples/dashboards">its README of the 
+repository</a>.</p>
 <p>To import into Grafana:</p>
 <ol>
 <li>Go to Grafana → Dashboards → Import</li>
@@ -2105,7 +2153,7 @@ spec:
 <tr>
 <td><code>istio_request_duration_milliseconds_bucket</code></td>
 <td>Gateway-level latency histogram</td>
-<td><code>destination_service_name</code></td>
+<td><code>destination_service_name</code>, <code>user</code></td>
 </tr>
 <tr>
 <td><code>vllm:e2e_request_latency_seconds</code></td>
@@ -2114,9 +2162,46 @@ spec:
 </tr>
 </tbody>
 </table>
+<h4 id="per-user-latency-tracking">Per-User Latency Tracking</h4>
+<p>The MaaS Platform uses an Istio Telemetry resource to add a <code>user</code> dimension to gateway latency metrics. This enables tracking request latency per authenticated user.</p>
+<p><strong>How it works:</strong></p>
+<ol>
+<li>The <code>gateway-auth-policy</code> injects the <code>X-MaaS-Username</code> header from the authenticated identity</li>
+<li>The Istio Telemetry resource extracts this header and adds it as a <code>user</code> label to the <code>REQUEST_DURATION</code> metric</li>
+<li>Prometheus scrapes these metrics from the Istio gateway</li>
+</ol>
+<p><strong>Configuration</strong> (<code>deployment/base/observability/istio-telemetry.yaml</code>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">telemetry.istio.io/v1</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Telemetry</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">latency-per-user</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">openshift-ingress</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="nt">selector</span><span class="p">:</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">      </span><span class="nt">gateway.networking.k8s.io/gateway-name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">maas-default-gateway</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">  </span><span class="nt">metrics</span><span class="p">:</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">providers</span><span class="p">:</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">prometheus</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">    </span><span class="nt">overrides</span><span class="p">:</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">match</span><span class="p">:</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">        </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REQUEST_DURATION</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">        </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CLIENT_AND_SERVER</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">      </span><span class="nt">tagOverrides</span><span class="p">:</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">        </span><span class="nt">user</span><span class="p">:</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">          </span><span class="nt">operation</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">UPSERT</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">request.headers[&quot;x-maas-username&quot;]</span>
+</code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Security</p>
+<p>The <code>X-MaaS-Username</code> header is injected by the AuthPolicy from the authenticated identity, not from client input. This prevents users from spoofing the header to manipulate metrics attribution.</p>
+</div>
 <h3 id="common-queries">Common Queries</h3>
 <div class="highlight"><pre><span></span><code># Token consumption per user
 sum by (user) (authorized_hits)
+
+# P99 latency per user (filter out unauthenticated requests)
+histogram_quantile(0.99, sum by (user, le) (rate(istio_request_duration_milliseconds_bucket{user!=&quot;&quot;,user!=&quot;unknown&quot;}[5m])))
 
 # Request rate per tier
 sum by (tier) (rate(authorized_calls[5m]))
@@ -2133,6 +2218,10 @@ topk(10, sum by (user) (authorized_hits))
 # Rate limit violations by tier
 sum by (tier) (rate(limited_calls[5m]))
 </code></pre></div>
+<div class="admonition tip">
+<p class="admonition-title">Filtering Unauthenticated Requests</p>
+<p>For per-user latency queries, use <code>user!="",user!="unknown"</code> to exclude requests that failed authentication (where the <code>X-MaaS-Username</code> header was not injected or has a default value). Token consumption metrics (<code>authorized_hits</code>, <code>authorized_calls</code>) from Limitador already only include successful requests.</p>
+</div>
 <h2 id="known-limitations">Known Limitations</h2>
 <h3 id="currently-blocked-features">Currently Blocked Features</h3>
 <p>Some dashboard features require upstream changes and are currently blocked:</p>
@@ -2146,11 +2235,6 @@ sum by (tier) (rate(limited_calls[5m]))
 </thead>
 <tbody>
 <tr>
-<td><strong>Latency per user</strong></td>
-<td>Istio metrics don't include <code>user</code> label</td>
-<td>Requires EnvoyFilter to inject user context</td>
-</tr>
-<tr>
 <td><strong>Input/Output token breakdown per user</strong></td>
 <td>vLLM doesn't label metrics with <code>user</code></td>
 <td>Total tokens available via <code>authorized_hits</code>; breakdown requires vLLM changes</td>
@@ -2161,6 +2245,28 @@ sum by (tier) (rate(limited_calls[5m]))
 <p class="admonition-title">Total Tokens vs Token Breakdown</p>
 <p>Total token consumption per user <strong>is available</strong> via <code>authorized_hits{user="..."}</code>. The blocked feature is specifically the input/output token breakdown (prompt vs generation tokens) per user, which requires vLLM to accept user context in requests.</p>
 </div>
+<h3 id="available-per-user-metrics">Available Per-User Metrics</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Metric</th>
+<th>Label</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Latency per user</strong></td>
+<td><code>istio_request_duration_milliseconds_bucket</code></td>
+<td><code>user</code></td>
+</tr>
+<tr>
+<td><strong>Token consumption per user</strong></td>
+<td><code>authorized_hits</code></td>
+<td><code>user</code></td>
+</tr>
+</tbody>
+</table>
 
 
 
@@ -2183,7 +2289,7 @@ sum by (tier) (rate(limited_calls[5m]))
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="January 28, 2026 14:23:40 UTC">January 28, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="February 4, 2026 14:19:50 UTC">February 4, 2026</span>
   </span>
 
     
