@@ -111,6 +111,17 @@ func (r *TenantReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 	}
 
+	usesCleanupFinalizer, err := tenantUsesCleanupFinalizer(&tenant)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Handle deletion before the teardown guard: finalizer cleanup must proceed even while
+	// LifecycleReconciler is tearing down MaaS (AITenant deletion waits on MaasTenantConfig).
+	if !tenant.DeletionTimestamp.IsZero() {
+		return r.handleDeletion(ctx, log, &tenant)
+	}
+
 	// Skip reconciliation during MaaS teardown to avoid blocking on gateway dependencies.
 	// When teardown is requested, LifecycleReconciler orchestrates cleanup independently.
 	// Try both controller namespace and app namespace (for deployments in operator infra namespace).
@@ -124,16 +135,6 @@ func (r *TenantReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctr
 			log.Info("skipping MaasTenantConfig reconciliation during MaaS teardown", "deploymentNamespace", depNS)
 			return ctrl.Result{}, nil
 		}
-	}
-
-	usesCleanupFinalizer, err := tenantUsesCleanupFinalizer(&tenant)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
-	// Handle deletion
-	if !tenant.DeletionTimestamp.IsZero() {
-		return r.handleDeletion(ctx, log, &tenant)
 	}
 
 	if usesCleanupFinalizer {
