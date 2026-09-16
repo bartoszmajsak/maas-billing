@@ -919,7 +919,9 @@ allow {
 		"deny-api-key-management": map[string]any{
 			"when": []any{
 				map[string]any{
-					"predicate": celIsAPIKey + ` && (request.path == "/maas-api/v1/api-keys" || request.path.startsWith("/maas-api/v1/api-keys/"))`,
+					// Parenthesize celIsAPIKey: it contains || when x-api-key is enabled; without
+					// parens CEL binds && tighter than || and Bearer API keys match every path.
+					"predicate": `(` + celIsAPIKey + `) && (request.path == "/maas-api/v1/api-keys" || request.path.startsWith("/maas-api/v1/api-keys/"))`,
 				},
 			},
 			"metrics":  false,

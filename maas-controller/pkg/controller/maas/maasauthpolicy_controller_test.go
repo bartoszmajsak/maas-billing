@@ -1808,6 +1808,38 @@ func TestBuildGatewayAuthPolicySpec_DenyAPIKeyManagement(t *testing.T) {
 		t.Fatalf("deny-api-key-management must be scoped to API keys: %q", predicate)
 	}
 
+	t.Run("x-api-key enabled parenthesizes API key OR before path guard", func(t *testing.T) {
+		r := &MaaSAuthPolicyReconciler{
+			InfraNamespace:   "maas-system",
+			GatewayName:      "maas-default-gateway",
+			GatewayNamespace: "gateway-ns",
+			ClusterAudience:  "https://kubernetes.default.svc",
+			MetadataCacheTTL: 60,
+			AuthzCacheTTL:    60,
+		}
+		spec := r.buildGatewayAuthPolicySpec("{}", nil, true, "", "models-as-a-service", "test-gateway-ns", "test-gateway")
+		enabledObj := &unstructured.Unstructured{Object: map[string]any{"spec": spec}}
+		when, found, err := unstructured.NestedSlice(enabledObj.Object,
+			"spec", "defaults", "rules", "authorization", "deny-api-key-management", "when")
+		if err != nil || !found || len(when) == 0 {
+			t.Fatalf("deny-api-key-management when missing for x-api-key enabled spec: found=%v err=%v", found, err)
+		}
+		condition, ok := when[0].(map[string]any)
+		if !ok {
+			t.Fatalf("deny-api-key-management when[0] is not a map: %T", when[0])
+		}
+		enabledPredicate, ok := condition["predicate"].(string)
+		if !ok || enabledPredicate == "" {
+			t.Fatal("deny-api-key-management predicate missing")
+		}
+		if !strings.HasPrefix(enabledPredicate, "(") || !strings.Contains(enabledPredicate, ") && (request.path") {
+			t.Fatalf("deny-api-key-management predicate must parenthesize celIsAPIKey when x-api-key enabled, got: %q", enabledPredicate)
+		}
+		if strings.Count(enabledPredicate, "||") < 2 {
+			t.Fatalf("expected Bearer and x-api-key OR branches plus path OR, got: %q", enabledPredicate)
+		}
+	})
+
 	patterns, found, err := unstructured.NestedSlice(obj.Object,
 		"spec", "defaults", "rules", "authorization", "deny-api-key-management", "patternMatching", "patterns")
 	if err != nil || !found {
