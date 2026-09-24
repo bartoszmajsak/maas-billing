@@ -450,3 +450,42 @@ func TestBuildGroupedLimits_UnlimitedNextToGroups(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildGroupLimit_RatesRenderedCanonically covers members that list the
+// same rate set in different orders, with a duplicate: whichever member comes
+// first, the rendered limit must be identical, or List ordering between
+// reconciles would flip the spec and force needless policy updates.
+func TestBuildGroupLimit_RatesRenderedCanonically(t *testing.T) {
+	hour := map[string]any{"limit": int64(1000), "window": "1h"}
+	sec := map[string]any{"limit": int64(99999), "window": "1s"}
+	a := subInfo{modelScoped: "ns/a@models/llm", rates: []any{sec, hour}}
+	b := subInfo{modelScoped: "ns/b@models/llm", rates: []any{hour, sec, hour}}
+	if rateGroupKey(a.rates) != rateGroupKey(b.rates) {
+		t.Fatalf("members must share a group: %q vs %q", rateGroupKey(a.rates), rateGroupKey(b.rates))
+	}
+
+	ab, err := json.Marshal(buildGroupLimit([]subInfo{a, b}))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	ba, err := json.Marshal(buildGroupLimit([]subInfo{b, a}))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(ab) != string(ba) {
+		t.Errorf("limit depends on member order:\n%s\n%s", ab, ba)
+	}
+
+	rates, _, _ := unstructured.NestedSlice(buildGroupLimit([]subInfo{b, a}), "rates")
+	want := []map[string]any{hour, sec}
+	if len(rates) != len(want) {
+		t.Fatalf("rates = %v, want %v (deduped, sorted)", rates, want)
+	}
+	for i := range want {
+		got, ok := rates[i].(map[string]any)
+		if !ok || got["limit"] != want[i]["limit"] || got["window"] != want[i]["window"] {
+			t.Errorf("rates = %v, want %v (deduped, sorted)", rates, want)
+			break
+		}
+	}
+}

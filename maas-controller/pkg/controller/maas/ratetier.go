@@ -85,8 +85,10 @@ func buildGroupedLimits(subs []subInfo) (map[string]any, []string) {
 }
 
 // buildGroupLimit renders one rate group's members into a TokenRateLimitPolicy
-// limit. All members share the same rates by construction (grouped by
-// rateGroupKey), so rates are taken from the first member.
+// limit. Members share a rate set but may list it in different orders or with
+// duplicates, and List gives no ordering guarantee, so the rates are rendered
+// in canonical order rather than as any one member wrote them - otherwise the
+// spec could change between reconciles and trigger needless policy updates.
 func buildGroupLimit(members []subInfo) map[string]any {
 	refs := make([]string, len(members))
 	for i, si := range members {
@@ -104,7 +106,7 @@ func buildGroupLimit(members []subInfo) map[string]any {
 	}
 
 	return map[string]any{
-		"rates": members[0].rates,
+		"rates": canonicalRates(members[0].rates),
 		"when": []any{
 			map[string]any{
 				// Exempt /v1/models endpoint from token rate limiting.
@@ -132,8 +134,22 @@ func buildGroupLimit(members []subInfo) map[string]any {
 // Rates are rendered "<limit>/<window>", deduped and sorted, so windows are
 // kept verbatim: "1m" and "60s" are different groups.
 func rateGroupKey(rates []any) string {
-	seen := make(map[string]struct{}, len(rates))
-	parts := make([]string, 0, len(rates))
+	key, _ := canonicalizeRates(rates)
+	return key
+}
+
+// canonicalRates returns rates deduped and sorted in rateGroupKey order, so
+// every member of a group renders the same rates list.
+func canonicalRates(rates []any) []any {
+	_, canonical := canonicalizeRates(rates)
+	return canonical
+}
+
+// canonicalizeRates computes the group key and the canonical rates list in one
+// pass so the two can never disagree.
+func canonicalizeRates(rates []any) (string, []any) {
+	byKey := make(map[string]any, len(rates))
+	keys := make([]string, 0, len(rates))
 	for _, r := range rates {
 		m, ok := r.(map[string]any)
 		if !ok {
@@ -142,14 +158,18 @@ func rateGroupKey(rates []any) string {
 		limit, _ := m["limit"].(int64)
 		window, _ := m["window"].(string)
 		key := strconv.FormatInt(limit, 10) + "/" + window
-		if _, dup := seen[key]; dup {
+		if _, dup := byKey[key]; dup {
 			continue
 		}
-		seen[key] = struct{}{}
-		parts = append(parts, key)
+		byKey[key] = r
+		keys = append(keys, key)
 	}
-	sort.Strings(parts)
-	return strings.Join(parts, ",")
+	sort.Strings(keys)
+	canonical := make([]any, len(keys))
+	for i, k := range keys {
+		canonical[i] = byKey[k]
+	}
+	return strings.Join(keys, ","), canonical
 }
 
 // rateGroupLimitName turns a rateGroupKey into a TokenRateLimitPolicy limit

@@ -32,8 +32,11 @@ At 19 route matches, one limit costs about 27 KB per listener. Before RHOAIENG-9
 To keep the object small, reuse a small set of standard rates across subscriptions instead of giving each subscription its own numbers. Spell them the same way too: `100/1m` and `100/60s` are different rate sets.
 
 ```bash
-# Gateway wasm config size in bytes (wasmplugin instead of envoyfilter on Kuadrant 1.4.x)
-kubectl get envoyfilter kuadrant-maas-default-gateway -n openshift-ingress -o json | wc -c
+# Gateway wasm config size in bytes, as compact JSON. Kuadrant 1.5+ writes an EnvoyFilter:
+kubectl get envoyfilter kuadrant-maas-default-gateway -n openshift-ingress -o json | jq -c . | wc -c
+
+# Kuadrant 1.4.x writes a WasmPlugin with the same name instead:
+kubectl get wasmplugin kuadrant-maas-default-gateway -n openshift-ingress -o json | jq -c . | wc -c
 
 # Limits per model TRLP
 kubectl get tokenratelimitpolicy -A -o json | \
