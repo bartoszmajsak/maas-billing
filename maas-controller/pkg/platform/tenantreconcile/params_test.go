@@ -329,11 +329,12 @@ func TestApplyPlatformParamsWithRenderedOverlay(t *testing.T) {
 
 	// Verify dual-stage filter chain with dual anchors:
 	//   [0..1] WasmPlugin (ODH/community Kuadrant), [2..3] wasm filter (RHCL 1.4),
-	//   [4..7] per-route disable MERGE on maas-api-route rules 0–3.
+	//   [4..7] per-route disable MERGE on maas-api-route rules 0–3,
+	//   [8..9] Istio's InferencePool filter moved in front of the router.
 	configPatches, found, err := unstructured.NestedSlice(payloadEnvoyFilter.Object, "spec", "configPatches")
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Len(t, configPatches, 8, "expected eight configPatches (4x filter insert + 4x MERGE)")
+	require.Len(t, configPatches, 10, "expected ten configPatches (4x filter insert + 4x MERGE + EPP reorder pair)")
 
 	wantWasmPluginAnchor := wasmpluginAnchorName(params.GatewayNamespace, params.GatewayName)
 	wantBeforeCluster := grpcClusterName(PayloadPreProcessingDeploymentName(tenantID), params.GatewayNamespace, 9004)
@@ -378,6 +379,7 @@ func TestApplyPlatformParamsWithRenderedOverlay(t *testing.T) {
 		require.True(t, found, "configPatches[%d] ipp disabled field should exist", i)
 		assert.True(t, ippDisabled, "configPatches[%d] ipp should be disabled", i)
 	}
+	requireEPPReorderPatches(t, configPatches)
 
 	// Verify payload-pre-processing Deployment and Service are present and namespaced correctly.
 	payloadBeforeDeployment := requireResource(t, resources, GVKDeployment, PayloadPreProcessingDeploymentName(tenantID))

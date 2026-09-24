@@ -884,9 +884,15 @@ func patchPayloadProcessingEnvoyFilter(log logr.Logger, r *unstructured.Unstruct
 		return fmt.Errorf("read EnvoyFilter configPatches: %w", err)
 	}
 	const (
-		filterPatchCount      = 4 // WasmPlugin pair + RHCL 1.4 wasm pair
-		routeDisablePatchBase = filterPatchCount
-		totalConfigPatches    = routeDisablePatchBase + 4
+		filterPatchCount       = 4 // WasmPlugin pair + RHCL 1.4 wasm pair
+		routeDisablePatchBase  = filterPatchCount
+		routeDisablePatchCount = 4
+		routeDisablePatchEnd   = routeDisablePatchBase + routeDisablePatchCount
+		// Trailing REMOVE + INSERT_BEFORE that move Istio's InferencePool filter in front of
+		// the router. Their anchors (Istio's fixed filter name and the router) are the same on
+		// every gateway, so they need no rewrite.
+		eppReorderPatchCount = 2
+		totalConfigPatches   = routeDisablePatchEnd + eppReorderPatchCount
 	)
 	if !found || len(configPatches) < totalConfigPatches {
 		return fmt.Errorf("EnvoyFilter configPatches: expected at least %d entries, got %d", totalConfigPatches, len(configPatches))
@@ -914,10 +920,11 @@ func patchPayloadProcessingEnvoyFilter(log logr.Logger, r *unstructured.Unstruct
 		configPatches[i] = patch
 	}
 
-	// Patches 4–7 disable ext_proc on all non-inference maas-api routes.
+	// Patches 4–7 disable ext_proc on all non-inference maas-api routes; the EPP reorder
+	// patches after them need no rewrite.
 	// Route name uses Istio's Gateway API convention: <namespace>.<httproute-name>.<rule-index>.
 	// Rule indices: 0=/v1/models, 1=/v1/subscriptions, 2=/v1/api-keys, 3=/maas-api/*
-	for i := routeDisablePatchBase; i < totalConfigPatches; i++ {
+	for i := routeDisablePatchBase; i < routeDisablePatchEnd; i++ {
 		patch, ok := configPatches[i].(map[string]any)
 		if !ok {
 			return fmt.Errorf("EnvoyFilter configPatches[%d] is not an object", i)
