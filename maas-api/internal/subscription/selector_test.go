@@ -784,6 +784,33 @@ func TestSelector_DegradedSubscriptionTRLPFiltering(t *testing.T) {
 			expectError:         true,
 			expectedErrorReason: "RateLimitNotEnforced",
 		},
+		// Same-named models in different namespaces: the status must be matched by model
+		// namespace too, which differs from the TRLP (HTTPRoute) namespace.
+		{
+			name: "Degraded subscription with same-named models - unready model blocks inference despite ready namesake",
+			subscription: createSubscriptionWithTRLPStatus("degraded-sub", []string{"g1"}, phaseDegraded, []map[string]any{
+				{"name": "llm", "namespace": "ns-a", "ready": true, "reason": "Valid"},
+				{"name": "llm", "namespace": "ns-b", "ready": true, "reason": "Valid"},
+			}, []map[string]any{
+				{"model": "llm", "modelNamespace": "ns-a", "name": "maas-trlp-llm", "namespace": "gw-a", "ready": true, "reason": "Accepted"},
+				{"model": "llm", "modelNamespace": "ns-b", "name": "maas-trlp-llm", "namespace": "gw-b", "ready": false, "reason": "InvalidSpec"},
+			}),
+			requestedModel:      "ns-b/llm",
+			expectError:         true,
+			expectedErrorReason: "RateLimitNotEnforced",
+		},
+		{
+			name: "Degraded subscription with same-named models - ready model allows inference despite unready namesake listed first",
+			subscription: createSubscriptionWithTRLPStatus("degraded-sub", []string{"g1"}, phaseDegraded, []map[string]any{
+				{"name": "llm", "namespace": "ns-a", "ready": true, "reason": "Valid"},
+				{"name": "llm", "namespace": "ns-b", "ready": true, "reason": "Valid"},
+			}, []map[string]any{
+				{"model": "llm", "modelNamespace": "ns-b", "name": "maas-trlp-llm", "namespace": "gw-b", "ready": false, "reason": "InvalidSpec"},
+				{"model": "llm", "modelNamespace": "ns-a", "name": "maas-trlp-llm", "namespace": "gw-a", "ready": true, "reason": "Accepted"},
+			}),
+			requestedModel: "ns-a/llm",
+			expectError:    false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -812,6 +839,67 @@ func TestSelector_DegradedSubscriptionTRLPFiltering(t *testing.T) {
 				if result == nil {
 					t.Fatal("Expected result but got nil")
 				}
+			}
+		})
+	}
+}
+
+// TestSelector_StatusesWithoutModelNamespace covers rate limit statuses that carry only the
+// model name: written by controllers that predate modelNamespace, or pruned by a CRD without
+// the field while a newer controller runs (operator skew).
+func TestSelector_StatusesWithoutModelNamespace(t *testing.T) {
+	log := logger.Production()
+	namesakes := func(nsBReason string, nsBReady bool) *unstructured.Unstructured {
+		return createSubscriptionWithTRLPStatus("degraded-sub", []string{"g1"}, phaseDegraded, []map[string]any{
+			{"name": "llm", "namespace": "ns-a", "ready": true, "reason": "Valid"},
+			{"name": "llm", "namespace": "ns-b", "ready": true, "reason": "Valid"},
+		}, []map[string]any{
+			{"model": "llm", "name": "maas-trlp-llm", "namespace": "gw-a", "ready": true, "reason": "Accepted"},
+			{"model": "llm", "name": "maas-trlp-llm", "namespace": "gw-b", "ready": nsBReady, "reason": nsBReason},
+		})
+	}
+
+	policyNamespaced := func() *unstructured.Unstructured {
+		return createSubscriptionWithTRLPStatus("degraded-sub", []string{"g1"}, phaseDegraded, []map[string]any{
+			{"name": "llm", "namespace": "ns-a", "ready": true, "reason": "Valid"},
+			{"name": "llm", "namespace": "ns-b", "ready": true, "reason": "Valid"},
+		}, []map[string]any{
+			{"model": "llm", "name": "maas-trlp-llm", "namespace": "ns-a", "ready": true, "reason": "Accepted"},
+			{"model": "llm", "name": "maas-trlp-llm", "namespace": "ns-b", "ready": false, "reason": "InvalidSpec"},
+		})
+	}
+
+	tests := []struct {
+		name           string
+		subscription   *unstructured.Unstructured
+		requestedModel string
+		wantReason     string // "" means inference is allowed
+	}{
+		// Only a controller that writes modelNamespace reports InvalidSpec, so this entry
+		// lost the field to pruning and may be the requested model's own.
+		{"pruned: unenforceable namesake blocks inference", namesakes("InvalidSpec", false), "ns-b/llm", "RateLimitNotEnforced"},
+		// The pruned entries can't be told apart, so the healthy namesake is denied too.
+		{"pruned: healthy namesake also blocked", namesakes("InvalidSpec", false), "ns-a/llm", "RateLimitNotEnforced"},
+		// Legacy statuses keep the first-match rule.
+		{"legacy: first same-named status decides", namesakes("NotAccepted", false), "ns-b/llm", ""},
+		// Route resolvers place the policy in the model namespace, which tells pruned namesakes apart.
+		{"pruned, policy namespace: unenforceable model blocked", policyNamespaced(), "ns-b/llm", "RateLimitNotEnforced"},
+		{"pruned, policy namespace: healthy namesake served", policyNamespaced(), "ns-a/llm", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			selector := subscription.NewSelector(log, &fakeLister{subscriptions: []*unstructured.Unstructured{tt.subscription}}, nil, nil)
+			//nolint:unqueryvet,nolintlint // False positive - not a SQL query
+			_, err := selector.Select([]string{"g1"}, "", "", tt.requestedModel)
+			if tt.wantReason == "" {
+				if err != nil {
+					t.Fatalf("Select(%s) = %v, want inference allowed", tt.requestedModel, err)
+				}
+				return
+			}
+			var unhealthy *subscription.ModelUnhealthyError
+			if !errors.As(err, &unhealthy) || unhealthy.Reason != tt.wantReason {
+				t.Fatalf("Select(%s) = %v, want %s", tt.requestedModel, err, tt.wantReason)
 			}
 		})
 	}

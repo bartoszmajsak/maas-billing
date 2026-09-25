@@ -1468,7 +1468,9 @@ func TestMaaSSubscriptionReconciler_WindowValuesInTRLP(t *testing.T) {
 // and no TRLP limit would match it.
 //
 // The subscription also references a same-named model in another namespace with a valid
-// limit, which must keep its place in that model's TRLP.
+// limit. maas-api matches rate limit status to the requested model, so each status must
+// carry the model's namespace, not only its name. The status is read back unstructured,
+// the way maas-api parses it.
 func TestMaaSSubscriptionReconciler_UnenforceableWindowOnSharedModel(t *testing.T) {
 	const (
 		subNamespace   = "default"
@@ -1562,8 +1564,7 @@ func TestMaaSSubscriptionReconciler_UnenforceableWindowOnSharedModel(t *testing.
 		if !ok {
 			t.Fatalf("tokenRateLimitStatus is %T, want map", raw)
 		}
-		// The policy namespace: each HTTPRoute, and so its TRLP, is in its model's namespace here.
-		ns, _ := s["namespace"].(string)
+		ns, _ := s["modelNamespace"].(string)
 		name, _ := s["model"].(string)
 		byModel[ns+"/"+name] = s
 	}
