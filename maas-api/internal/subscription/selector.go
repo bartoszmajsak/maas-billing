@@ -25,6 +25,10 @@ const (
 	PhaseFailed   = "Failed"
 )
 
+// Rate limit status reasons.
+// These must match the ConditionReason values defined in maas-controller/api/maas/v1alpha1/common_types.go.
+const reasonInvalidSpec = "InvalidSpec"
+
 // Lister provides access to MaaSSubscription resources from an informer cache.
 type Lister interface {
 	List() ([]*unstructured.Unstructured, error)
@@ -474,6 +478,9 @@ func parseSubscription(obj *unstructured.Unstructured) (subscription, error) {
 					if model, ok := statusMap["model"].(string); ok {
 						trlpStatus.Model = model
 					}
+					if modelNamespace, ok := statusMap["modelNamespace"].(string); ok {
+						trlpStatus.ModelNamespace = modelNamespace
+					}
 					if name, ok := statusMap["name"].(string); ok {
 						trlpStatus.Name = name
 					}
@@ -718,31 +725,22 @@ func checkModelHealth(sub *subscription, requestedModel string) error {
 		}
 	}
 
-	// Every model left here has a token budget, so its TRLP must be ready. An
-	// unlimited model needs it too: without it the gateway default deny applies,
-	// which the user would see as an unexplained 429.
-	for _, trlp := range sub.TokenRateLimitStatuses {
-		if trlp.Model == ref.Name {
-			if !trlp.Ready {
-				return &ModelUnhealthyError{
-					Subscription: sub.Name,
-					Phase:        sub.Phase,
-					Reason:       "RateLimitNotEnforced",
-					Message:      "subscription rate limiting policies are not ready",
-				}
-			}
-			// TRLP is ready - allow inference
-			return nil
+	// Every model of a Degraded subscription is judged by its own rate limit status.
+	// An unlimited model needs its TRLP too: without it the gateway default deny
+	// applies, seen as an unexplained 429.
+	trlp := findTokenRateLimitStatus(sub.TokenRateLimitStatuses, ref.Namespace, ref.Name)
+	if trlp != nil && trlp.Reason == reasonInvalidSpec {
+		return unenforceableBudgetError(sub)
+	}
+	if trlp == nil || !trlp.Ready {
+		return &ModelUnhealthyError{
+			Subscription: sub.Name,
+			Phase:        sub.Phase,
+			Reason:       "RateLimitNotEnforced",
+			Message:      "subscription rate limiting policies are not ready",
 		}
 	}
-
-	// Model is governed by a TRLP but its status is missing - fail closed
-	return &ModelUnhealthyError{
-		Subscription: sub.Name,
-		Phase:        sub.Phase,
-		Reason:       "RateLimitNotEnforced",
-		Message:      "subscription rate limiting policies are not ready",
-	}
+	return nil
 }
 
 // unenforceableBudgetError reports a model whose token budget in the subscription the
@@ -755,6 +753,45 @@ func unenforceableBudgetError(sub *subscription) error {
 		Reason:       "RateLimitNotEnforced",
 		Message:      "token rate limits for this model are invalid in the subscription; an administrator must fix them",
 	}
+}
+
+// findTokenRateLimitStatus returns the rate limit status for model namespace/name, or
+// nil when there is none. A subscription can reference same-named models in different
+// namespaces, so an exact modelNamespace match wins. Statuses without modelNamespace
+// come from controllers that predate the field, or lost it to a CRD that prunes it. For
+// those the policy namespace is tried next, since every route resolver places the policy
+// in the model namespace. Failing that, an InvalidSpec entry wins over the first
+// same-named one: only controllers that write modelNamespace report InvalidSpec, so the
+// entry lost the field to pruning and may be this model's.
+func findTokenRateLimitStatus(statuses []TokenRateLimitStatus, namespace, name string) *TokenRateLimitStatus {
+	var samePolicyNamespace, invalidSpec, first *TokenRateLimitStatus
+	for i := range statuses {
+		s := &statuses[i]
+		if s.Model != name {
+			continue
+		}
+		if s.ModelNamespace != "" {
+			if s.ModelNamespace == namespace {
+				return s
+			}
+			continue
+		}
+		switch {
+		case s.Namespace == namespace && samePolicyNamespace == nil:
+			samePolicyNamespace = s
+		case s.Reason == reasonInvalidSpec && invalidSpec == nil:
+			invalidSpec = s
+		case first == nil:
+			first = s
+		}
+	}
+	if samePolicyNamespace != nil {
+		return samePolicyNamespace
+	}
+	if invalidSpec != nil {
+		return invalidSpec
+	}
+	return first
 }
 
 // findModelNamespaces returns all namespaces where the given model name appears in the subscription's modelRefs.

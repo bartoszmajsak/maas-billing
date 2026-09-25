@@ -288,7 +288,8 @@ func (r *MaaSSubscriptionReconciler) checkTokenRateLimitHealth(ctx context.Conte
 				Name:      policyName,
 				Namespace: ref.Namespace,
 			},
-			Model: ref.Name,
+			Model:          ref.Name,
+			ModelNamespace: ref.Namespace,
 		}
 
 		// Find the TRLP for this model (TRLP lives in HTTPRoute namespace)
@@ -383,13 +384,14 @@ func deriveFinalPhase(modelStatuses []maasv1alpha1.ModelRefStatus, trlpStatuses 
 		return maasv1alpha1.PhaseFailed, "no model references specified"
 	}
 
-	// Build a set of models that validateModelRefs reported as valid
+	// Build a set of models that validateModelRefs reported as valid, keyed by
+	// namespace/name: same-named models in different namespaces are distinct.
 	validModelSet := make(map[string]struct{})
 	var validModels, invalidModels int
 	for _, s := range modelStatuses {
 		if s.Ready {
 			validModels++
-			validModelSet[s.Name] = struct{}{}
+			validModelSet[s.Namespace+"/"+s.Name] = struct{}{}
 		} else {
 			invalidModels++
 		}
@@ -403,7 +405,7 @@ func deriveFinalPhase(modelStatuses []maasv1alpha1.ModelRefStatus, trlpStatuses 
 		if s.Ready {
 			continue
 		}
-		_, validModel := validModelSet[s.Model]
+		_, validModel := validModelSet[s.ModelNamespace+"/"+s.Model]
 		switch s.Reason {
 		case maasv1alpha1.ReasonBackendNotReady:
 			// Only count as backend issue if the model was reported as valid
@@ -542,7 +544,7 @@ func (r *MaaSSubscriptionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	backendNotReady := make(map[string]string, len(trlpStatuses))
 	for _, ts := range trlpStatuses {
 		if ts.Reason == maasv1alpha1.ReasonBackendNotReady {
-			backendNotReady[ts.Namespace+"/"+ts.Model] = ts.Message
+			backendNotReady[ts.ModelNamespace+"/"+ts.Model] = ts.Message
 		}
 	}
 	for i := range modelStatuses {

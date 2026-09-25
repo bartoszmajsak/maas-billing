@@ -328,6 +328,13 @@ spec:
                       maxLength: 63
                       minLength: 1
                       type: string
+                    modelNamespace:
+                      description: |-
+                        ModelNamespace is the namespace of the MaaSModelRef this TokenRateLimitPolicy
+                        targets. Namespace is the policy's namespace, which follows the HTTPRoute; it
+                        holds the model namespace until the HTTPRoute is found.
+                      maxLength: 63
+                      type: string
                     name:
                       description: Name of the referenced resource
                       maxLength: 253

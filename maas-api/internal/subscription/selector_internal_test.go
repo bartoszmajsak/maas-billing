@@ -194,3 +194,32 @@ func TestEnforceableModelDuplicateEntries(t *testing.T) {
 		t.Errorf("other/llm: want unenforceable, it has no token budget")
 	}
 }
+
+func TestFindTokenRateLimitStatus(t *testing.T) {
+	status := func(modelNamespace, policyNamespace, reason string) TokenRateLimitStatus {
+		return TokenRateLimitStatus{Model: "llm", ModelNamespace: modelNamespace, Namespace: policyNamespace, Reason: reason}
+	}
+	tests := []struct {
+		name     string
+		statuses []TokenRateLimitStatus
+		want     int // index into statuses, -1 for none
+	}{
+		{"exact model namespace wins", []TokenRateLimitStatus{status("ns-a", "ns-a", "Accepted"), status("ns-b", "ns-b", "InvalidSpec")}, 1},
+		{"other model namespace is never used", []TokenRateLimitStatus{status("ns-a", "ns-a", "Accepted")}, -1},
+		{"without model namespace, the policy namespace decides", []TokenRateLimitStatus{status("", "ns-a", "Accepted"), status("", "ns-b", "InvalidSpec")}, 1},
+		{"without either, InvalidSpec wins", []TokenRateLimitStatus{status("", "gw", "Accepted"), status("", "gw", "InvalidSpec")}, 1},
+		{"without either, the first one decides", []TokenRateLimitStatus{status("", "gw", "Accepted"), status("", "gw", "NotAccepted")}, 0},
+		{"no status for the model", nil, -1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := findTokenRateLimitStatus(tt.statuses, "ns-b", "llm")
+			switch {
+			case tt.want < 0 && got != nil:
+				t.Errorf("got %+v, want none", *got)
+			case tt.want >= 0 && got != &tt.statuses[tt.want]:
+				t.Errorf("got %+v, want statuses[%d] %+v", got, tt.want, tt.statuses[tt.want])
+			}
+		})
+	}
+}

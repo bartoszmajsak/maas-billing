@@ -80,12 +80,13 @@ type TokenRateLimit struct {
 
 // TokenRateLimitStatus represents the status of a TokenRateLimitPolicy for a model.
 type TokenRateLimitStatus struct {
-	Model     string `json:"model"`
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
-	Ready     bool   `json:"ready"`
-	Reason    string `json:"reason"`
-	Message   string `json:"message"`
+	Model          string `json:"model"`
+	ModelNamespace string `json:"modelNamespace"`
+	Name           string `json:"name"`
+	Namespace      string `json:"namespace"`
+	Ready          bool   `json:"ready"`
+	Reason         string `json:"reason"`
+	Message        string `json:"message"`
 }
 
 // BillingRate defines billing information.

@@ -1823,6 +1823,23 @@ func policyStatus(ns, name string, ready bool, reason maasv1alpha1.ConditionReas
 	return maasv1alpha1.TokenRateLimitStatus{
 		ResourceRefStatus: maasv1alpha1.ResourceRefStatus{Name: "maas-trlp-" + name, Namespace: ns, Ready: ready, Reason: reason},
 		Model:             name,
+		ModelNamespace:    ns,
+	}
+}
+
+// TestDeriveFinalPhase_NamespacedModels covers same-named models in different namespaces,
+// which must be told apart when a model's policy status is matched to its model status.
+func TestDeriveFinalPhase_NamespacedModels(t *testing.T) {
+	models := []maasv1alpha1.ModelRefStatus{modelStatus("ns-a", "llm", true, maasv1alpha1.ReasonValid), modelStatus("ns-b", "llm", false, maasv1alpha1.ReasonNotFound)}
+	policies := []maasv1alpha1.TokenRateLimitStatus{policyStatus("ns-a", "llm", true, maasv1alpha1.ReasonAccepted), policyStatus("ns-b", "llm", false, maasv1alpha1.ReasonBackendNotReady)}
+
+	// The missing ns-b/llm must not count against the healthy ns-a/llm.
+	phase, msg := deriveFinalPhase(models, policies)
+	if phase != maasv1alpha1.PhaseDegraded {
+		t.Errorf("phase = %q (%s), want %q", phase, msg, maasv1alpha1.PhaseDegraded)
+	}
+	if want := "1 of 2 model references are invalid or unavailable"; !strings.Contains(msg, want) {
+		t.Errorf("message = %q, want it to contain %q", msg, want)
 	}
 }
 

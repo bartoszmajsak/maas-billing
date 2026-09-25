@@ -149,6 +149,12 @@ type TokenRateLimitStatus struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
 	Model string `json:"model"`
+	// ModelNamespace is the namespace of the MaaSModelRef this TokenRateLimitPolicy
+	// targets. Namespace is the policy's namespace, which follows the HTTPRoute; it
+	// holds the model namespace until the HTTPRoute is found.
+	// +kubebuilder:validation:MaxLength=63
+	// +optional
+	ModelNamespace string `json:"modelNamespace,omitempty"`
 }
 
 // MaaSSubscriptionStatus defines the observed state of MaaSSubscription
