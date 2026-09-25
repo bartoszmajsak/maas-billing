@@ -96,3 +96,50 @@ func TestCheckModelHealthBodyRoutedAlias(t *testing.T) {
 		})
 	}
 }
+
+// TestCheckModelHealthNoTokenBudget covers a Degraded subscription whose model has neither
+// tokenRateLimits nor unlimited. The controller leaves such a model out of the TRLP and
+// reports it not ready, so inference must be denied rather than allowed for having no
+// limit to check.
+func TestCheckModelHealthNoTokenBudget(t *testing.T) {
+	sub := &subscription{
+		Name:                   "degraded-sub",
+		Phase:                  PhaseDegraded,
+		ModelRefs:              []ModelRefInfo{{Name: "llm", Namespace: "ns"}},
+		TokenRateLimitStatuses: []TokenRateLimitStatus{{Model: "llm", Ready: false, Reason: "InvalidSpec"}},
+	}
+	err := checkModelHealth(sub, "ns/llm")
+	var unhealthy *ModelUnhealthyError
+	if !errors.As(err, &unhealthy) || unhealthy.Reason != "RateLimitNotEnforced" {
+		t.Fatalf("checkModelHealth(ns/llm) = %v, want RateLimitNotEnforced", err)
+	}
+}
+
+// TestCheckModelHealthUnenforceableSpec covers an Active subscription whose model has a
+// token budget the controller cannot enforce, as seen while the Degraded status has not
+// been written: during a rolling upgrade, or when the API server rejects the write.
+// maas-api must deny it from the spec rather than trust the phase.
+func TestCheckModelHealthUnenforceableSpec(t *testing.T) {
+	tests := []struct {
+		name string
+		ref  ModelRefInfo
+	}{
+		{"window over 366 days", ModelRefInfo{Name: "llm", Namespace: "ns", TokenRateLimits: []TokenRateLimit{{Limit: 1000, Window: "9999h"}}}},
+		{"no token budget", ModelRefInfo{Name: "llm", Namespace: "ns"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sub := &subscription{
+				Name:                   "active-sub",
+				Phase:                  PhaseActive,
+				ModelRefs:              []ModelRefInfo{tt.ref},
+				TokenRateLimitStatuses: []TokenRateLimitStatus{{Model: "llm", Ready: true, Reason: "Accepted"}},
+			}
+			err := checkModelHealth(sub, "ns/llm")
+			var unhealthy *ModelUnhealthyError
+			if !errors.As(err, &unhealthy) || unhealthy.Reason != "RateLimitNotEnforced" {
+				t.Fatalf("checkModelHealth(ns/llm) = %v, want RateLimitNotEnforced", err)
+			}
+		})
+	}
+}
