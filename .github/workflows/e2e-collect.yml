@@ -41,6 +41,17 @@ jobs:
       - name: Install e2e requirements
         run: pip install -r test/e2e/requirements.txt
 
+      - name: Install oc
+        env:
+          # Collection only needs oc to exist; without a cluster "oc get crd" fails and the
+          # modules that check for optional CRDs skip themselves.
+          OC_VERSION: 4.22.14
+        run: |
+          base="https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/${OC_VERSION}"
+          curl -sSfLO "${base}/openshift-client-linux.tar.gz"
+          curl -sSfL "${base}/sha256sum.txt" | grep ' openshift-client-linux.tar.gz$' | sha256sum -c -
+          sudo tar -xzf openshift-client-linux.tar.gz -C /usr/local/bin oc
+
       - name: Collect e2e tests
         working-directory: test/e2e
         run: python -m pytest --collect-only -q tests/
