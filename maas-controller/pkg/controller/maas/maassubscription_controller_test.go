@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -30,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -1823,10 +1825,20 @@ func TestMaaSSubscriptionReconciler_DuplicateModelRefWindows(t *testing.T) {
 // with an accepted TRLP, and a client builder holding them.
 func sharedModelWithBadWindow(t *testing.T) *fake.ClientBuilder {
 	t.Helper()
+	return sharedModelWithBadSub(t, func(ref *maasv1alpha1.ModelSubscriptionRef) {
+		ref.TokenRateLimits[0].Window = "9999h"
+	})
+}
+
+// sharedModelWithBadSub returns a model shared by sub-valid (1m) and sub-bad, whose model
+// reference breakRef makes unenforceable, with an accepted TRLP, and a client builder
+// holding them.
+func sharedModelWithBadSub(t *testing.T, breakRef func(*maasv1alpha1.ModelSubscriptionRef)) *fake.ClientBuilder {
+	t.Helper()
 	const namespace, modelName = "default", "llm"
 	validSub := newMaaSSubscription("sub-valid", namespace, "team-a", modelName, 1000)
 	badSub := newMaaSSubscription("sub-bad", namespace, "team-b", modelName, 1000)
-	badSub.Spec.ModelRefs[0].TokenRateLimits[0].Window = "9999h"
+	breakRef(&badSub.Spec.ModelRefs[0])
 	return fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithRESTMapper(testRESTMapper()).
@@ -1935,6 +1947,72 @@ func rejectedStatusWrite(name string) error {
 	return apierrors.NewInvalid(maasv1alpha1.GroupVersion.WithKind("MaaSSubscription").GroupKind(), name, field.ErrorList{
 		field.Invalid(field.NewPath("spec", "modelRefs").Index(0), "object", "tokenRateLimits is required unless unlimited is true"),
 	})
+}
+
+// TestMaaSSubscriptionReconciler_RejectedStatusWriteIsTerminal covers an API server that
+// rejects the status write for the stored spec, as servers before Kubernetes 1.33 do for a
+// model reference stored before the CRD required a token budget. Retrying cannot help, so
+// the error is terminal and reported as an event instead of an endless retry.
+func TestMaaSSubscriptionReconciler_RejectedStatusWriteIsTerminal(t *testing.T) {
+	noBudget := func(ref *maasv1alpha1.ModelSubscriptionRef) { ref.TokenRateLimits = nil }
+	c := sharedModelWithBadSub(t, noBudget).WithInterceptorFuncs(interceptor.Funcs{
+		SubResourceUpdate: func(ctx context.Context, cl client.Client, subResource string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+			return rejectedStatusWrite(obj.GetName())
+		},
+	}).Build()
+	recorder := record.NewFakeRecorder(10)
+	r := &MaaSSubscriptionReconciler{Client: c, Scheme: scheme, Recorder: recorder}
+
+	_, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "sub-bad", Namespace: "default"}})
+	if !errors.Is(err, reconcile.TerminalError(nil)) || !apierrors.IsInvalid(err) {
+		t.Errorf("Reconcile = %v, want a terminal Invalid error", err)
+	}
+	if events := drainEvents(recorder); !strings.Contains(strings.Join(events, "\n"), "Warning StatusUpdateRejected") {
+		t.Errorf("events = %q, want a StatusUpdateRejected warning", events)
+	}
+}
+
+// TestMaaSSubscriptionReconciler_UnenforceableBudgetEventOnce covers the Warning event for a
+// model whose budget became unenforceable: once on the transition, not on every reconcile.
+func TestMaaSSubscriptionReconciler_UnenforceableBudgetEventOnce(t *testing.T) {
+	c := sharedModelWithBadWindow(t).Build()
+	recorder := record.NewFakeRecorder(10)
+	r := &MaaSSubscriptionReconciler{Client: c, Scheme: scheme, Recorder: recorder}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "sub-bad", Namespace: "default"}}
+	for range 2 {
+		if _, err := r.Reconcile(t.Context(), req); err != nil {
+			t.Fatalf("Reconcile: unexpected error: %v", err)
+		}
+	}
+	events := drainEvents(recorder)
+	if len(events) != 1 || !strings.HasPrefix(events[0], "Warning UnenforceableTokenBudget Inference on model default/llm is denied") {
+		t.Errorf("events = %q, want one UnenforceableTokenBudget warning for default/llm", events)
+	}
+}
+
+func TestTruncateStatusMessage(t *testing.T) {
+	fits := strings.Repeat("a", maxStatusMessageLength)
+	if got := truncateStatusMessage(fits); got != fits {
+		t.Errorf("a message at the limit was changed to %d runes", len([]rune(got)))
+	}
+	// Multi-byte runes: the limit counts characters, and a cut must not split one.
+	long := strings.Repeat("ż", maxStatusMessageLength+1)
+	got := truncateStatusMessage(long)
+	if n := len([]rune(got)); n != maxStatusMessageLength || !strings.HasSuffix(got, "...") || !utf8.ValidString(got) {
+		t.Errorf("truncated message has %d runes (valid UTF-8: %v), want %d ending in ...", n, utf8.ValidString(got), maxStatusMessageLength)
+	}
+}
+
+func drainEvents(recorder *record.FakeRecorder) []string {
+	var events []string
+	for {
+		select {
+		case e := <-recorder.Events:
+			events = append(events, e)
+		default:
+			return events
+		}
+	}
 }
 
 func modelStatus(ns, name string, ready bool, reason maasv1alpha1.ConditionReason) maasv1alpha1.ModelRefStatus {

@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -36,6 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -72,6 +74,9 @@ type MaaSSubscriptionReconciler struct {
 	// MaxConcurrentReconciles is the maximum number of concurrent Reconciles which can be run.
 	// Defaults to 1 if not set.
 	MaxConcurrentReconciles int
+	// Recorder emits Warning events when a model's token budget becomes unenforceable
+	// or the API server rejects a status write.
+	Recorder record.EventRecorder
 }
 
 //+kubebuilder:rbac:groups=maas.opendatahub.io,resources=maassubscriptions,verbs=get;list;watch;create;update;patch;delete
@@ -485,8 +490,7 @@ func (r *MaaSSubscriptionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// No finalizer needed — there are no TRLPs to clean up.
 	if reflect.DeepEqual(subscription.Spec, maasv1alpha1.MaaSSubscriptionSpec{}) {
 		statusSnapshot := subscription.Status.DeepCopy()
-		r.updateStatus(ctx, subscription, maasv1alpha1.PhaseInvalid, "spec is required", statusSnapshot)
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, terminalIfRejected(r.updateStatus(ctx, subscription, maasv1alpha1.PhaseInvalid, "spec is required", statusSnapshot))
 	}
 
 	// Add finalizer if not present
@@ -519,21 +523,22 @@ func (r *MaaSSubscriptionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		if err := r.reconcileTokenRateLimitPolicies(ctx, log, subscription); err != nil {
 			log.Error(err, "failed to reconcile TokenRateLimitPolicies")
 			subscription.Status.Phase = maasv1alpha1.PhaseFailed
-			r.updateStatus(ctx, subscription, maasv1alpha1.PhaseFailed, fmt.Sprintf("failed to reconcile TokenRateLimitPolicies: %v", err), statusSnapshot)
-			return ctrl.Result{}, err
+			statusErr := r.updateStatus(ctx, subscription, maasv1alpha1.PhaseFailed, fmt.Sprintf("failed to reconcile TokenRateLimitPolicies: %v", err), statusSnapshot)
+			return ctrl.Result{}, errors.Join(err, statusErr)
 		}
 	} else {
 		// No valid models - clean up any stale TRLPs from previous reconciliations
 		if err := r.cleanupStaleTRLPs(ctx, log, subscription); err != nil {
 			log.Error(err, "failed to clean up stale TokenRateLimitPolicies")
-			r.updateStatus(ctx, subscription, maasv1alpha1.PhaseFailed, fmt.Sprintf("failed to clean up stale TokenRateLimitPolicies: %v", err), statusSnapshot)
-			return ctrl.Result{}, err
+			statusErr := r.updateStatus(ctx, subscription, maasv1alpha1.PhaseFailed, fmt.Sprintf("failed to clean up stale TokenRateLimitPolicies: %v", err), statusSnapshot)
+			return ctrl.Result{}, errors.Join(err, statusErr)
 		}
 	}
 
 	// Check TRLP health and populate status
 	trlpStatuses := r.checkTokenRateLimitHealth(ctx, subscription)
 	subscription.Status.TokenRateLimitStatuses = trlpStatuses
+	r.warnUnenforceableBudgets(subscription, statusSnapshot.TokenRateLimitStatuses, trlpStatuses)
 
 	// Correct stale modelRefStatuses: validateModelRefs may have reported a model
 	// as valid (informer cache still had it) while the model is actually being
@@ -560,9 +565,7 @@ func (r *MaaSSubscriptionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	// Derive final phase based on model and TRLP health
 	phase, message := deriveFinalPhase(modelStatuses, trlpStatuses)
-	r.updateStatus(ctx, subscription, phase, message, statusSnapshot)
-
-	return ctrl.Result{}, nil
+	return ctrl.Result{}, terminalIfRejected(r.updateStatus(ctx, subscription, phase, message, statusSnapshot))
 }
 
 func (r *MaaSSubscriptionReconciler) reconcileTokenRateLimitPolicies(ctx context.Context, log logr.Logger, subscription *maasv1alpha1.MaaSSubscription) error {
@@ -990,7 +993,10 @@ func (r *MaaSSubscriptionReconciler) handleDeletion(ctx context.Context, log log
 	return ctrl.Result{}, nil
 }
 
-func (r *MaaSSubscriptionReconciler) updateStatus(ctx context.Context, subscription *maasv1alpha1.MaaSSubscription, phase maasv1alpha1.Phase, message string, statusSnapshot *maasv1alpha1.MaaSSubscriptionStatus) {
+// updateStatus writes the derived status and returns the write error, so Reconcile can
+// hand it to controller-runtime for a retry. maas-api authorizes from this status, and
+// nothing else requeues the subscription after a failed write.
+func (r *MaaSSubscriptionReconciler) updateStatus(ctx context.Context, subscription *maasv1alpha1.MaaSSubscription, phase maasv1alpha1.Phase, message string, statusSnapshot *maasv1alpha1.MaaSSubscriptionStatus) error {
 	// Status-only updates do not bump metadata.generation, so this reconcile may not re-queue.
 	// Merge SpecPriorityDuplicate from the API server so we do not clobber the async duplicate-priority scan.
 	statusTarget := subscription
@@ -1005,6 +1011,12 @@ func (r *MaaSSubscriptionReconciler) updateStatus(ctx context.Context, subscript
 	}
 
 	subscription.Status.Phase = phase
+	for i := range subscription.Status.ModelRefStatuses {
+		subscription.Status.ModelRefStatuses[i].Message = truncateStatusMessage(subscription.Status.ModelRefStatuses[i].Message)
+	}
+	for i := range subscription.Status.TokenRateLimitStatuses {
+		subscription.Status.TokenRateLimitStatuses[i].Message = truncateStatusMessage(subscription.Status.TokenRateLimitStatuses[i].Message)
+	}
 
 	var status metav1.ConditionStatus
 	var reason maasv1alpha1.ConditionReason
@@ -1035,13 +1047,64 @@ func (r *MaaSSubscriptionReconciler) updateStatus(ctx context.Context, subscript
 	})
 
 	if equality.Semantic.DeepEqual(currentStatus, subscription.Status) {
-		return
+		return nil
 	}
 
 	statusTarget.Status = subscription.Status
 	if err := r.Status().Update(ctx, statusTarget); err != nil {
-		log := oteljson.FromContext(ctx)
-		log.Error(err, "failed to update MaaSSubscription status", "name", subscription.Name)
+		err = fmt.Errorf("failed to update MaaSSubscription status: %w", err)
+		if apierrors.IsInvalid(err) && r.Recorder != nil {
+			r.Recorder.Event(subscription, corev1.EventTypeWarning, "StatusUpdateRejected", truncateStatusMessage(err.Error()))
+		}
+		return err
+	}
+	return nil
+}
+
+// terminalIfRejected makes a status write the API server rejected terminal. Retrying cannot
+// help: the server rejects the object as stored. Before Kubernetes 1.33 that includes spec
+// values a newer CRD rule forbids, even on a status write. maas-api denies such a model from
+// the spec regardless.
+//
+// Only for a status write with nothing else left to retry: errors.Join keeps the terminal
+// marker, so a TRLP failure joined to it would never be retried.
+func terminalIfRejected(err error) error {
+	if apierrors.IsInvalid(err) {
+		return reconcile.TerminalError(err)
+	}
+	return err
+}
+
+// maxStatusMessageLength is ResourceRefStatus.Message's MaxLength. A longer message, such
+// as a Kuadrant condition copied verbatim, would get every status write rejected.
+const maxStatusMessageLength = 1024
+
+func truncateStatusMessage(msg string) string {
+	if utf8.RuneCountInString(msg) <= maxStatusMessageLength {
+		return msg
+	}
+	return string([]rune(msg)[:maxStatusMessageLength-3]) + "..."
+}
+
+// warnUnenforceableBudgets emits a Warning event for each model whose token budget became
+// unenforceable since the last written status, so the transition is reported once rather
+// than on every reconcile.
+func (r *MaaSSubscriptionReconciler) warnUnenforceableBudgets(sub *maasv1alpha1.MaaSSubscription, previous, current []maasv1alpha1.TokenRateLimitStatus) {
+	if r.Recorder == nil {
+		return
+	}
+	wasUnenforceable := make(map[string]bool, len(previous))
+	for _, s := range previous {
+		if s.Reason == maasv1alpha1.ReasonInvalidSpec {
+			wasUnenforceable[s.ModelNamespace+"/"+s.Model] = true
+		}
+	}
+	for _, s := range current {
+		model := s.ModelNamespace + "/" + s.Model
+		if s.Reason == maasv1alpha1.ReasonInvalidSpec && !wasUnenforceable[model] {
+			r.Recorder.Eventf(sub, corev1.EventTypeWarning, "UnenforceableTokenBudget",
+				"Inference on model %s is denied until its token budget is fixed: %s", model, truncateStatusMessage(s.Message))
+		}
 	}
 }
 
@@ -1155,6 +1218,10 @@ func conditionsSemanticallyEqual(a, b *metav1.Condition) bool {
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *MaaSSubscriptionReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.Recorder == nil {
+		r.Recorder = mgr.GetEventRecorderFor("maas-subscription-controller")
+	}
+
 	// Register field indexer for efficient lookup of MaaSSubscriptions by model reference.
 	// This avoids cluster-wide scans when finding subscriptions for a specific model.
 	if err := mgr.GetFieldIndexer().IndexField(
