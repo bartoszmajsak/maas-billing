@@ -1461,10 +1461,11 @@ func TestMaaSSubscriptionReconciler_WindowValuesInTRLP(t *testing.T) {
 	}
 }
 
-// TestMaaSSubscriptionReconciler_UnenforceableWindowOnSharedModel covers a window the CRD
-// pattern admits but validateTokenRateLimit rejects. Such a subscription is left out of the
-// model's TRLP, so it must not report that TRLP as ready: maas-api authorizes inference for
-// Active subscriptions without looking at rate limits, and no TRLP limit would match it.
+// TestMaaSSubscriptionReconciler_UnenforceableWindowOnSharedModel covers a window stored
+// before the CRD pattern capped hours, which validateTokenRateLimit rejects. Such a
+// subscription is left out of the model's TRLP, so it must not report that TRLP as ready:
+// maas-api authorizes inference for Active subscriptions without looking at rate limits,
+// and no TRLP limit would match it.
 //
 // The subscription also references a same-named model in another namespace with a valid
 // limit, which must keep its place in that model's TRLP.
