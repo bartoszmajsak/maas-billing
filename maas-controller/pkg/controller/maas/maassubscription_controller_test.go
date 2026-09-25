@@ -18,6 +18,7 @@ package maas
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -28,9 +29,12 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gatewayapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	maasv1alpha1 "github.com/opendatahub-io/models-as-a-service/maas-controller/api/maas/v1alpha1"
@@ -1588,6 +1592,65 @@ func TestMaaSSubscriptionReconciler_UnenforceableWindowOnSharedModel(t *testing.
 	}
 }
 
+// TestMaaSSubscriptionReconciler_UnenforceableWindowStatusWriteRetried covers a subscription
+// already reported Active whose window the controller cannot enforce. The denial only takes
+// effect once the new status reaches the API server: maas-api does not check rate limits for
+// Active subscriptions, and nothing else requeues the subscription. A failed status write must
+// be returned from Reconcile so controller-runtime retries it.
+func TestMaaSSubscriptionReconciler_UnenforceableWindowStatusWriteRetried(t *testing.T) {
+	const (
+		namespace      = "default"
+		modelName      = "llm"
+		httpRouteName  = "maas-" + modelName
+		trlpName       = "maas-trlp-" + modelName
+		validSubName   = "sub-valid"
+		invalidSubName = "sub-invalid"
+	)
+
+	validSub := newMaaSSubscription(validSubName, namespace, "team-a", modelName, 1000)
+	invalidSub := newMaaSSubscription(invalidSubName, namespace, "team-b", modelName, 1000)
+	invalidSub.Spec.ModelRefs[0].TokenRateLimits[0].Window = "9999h"
+	invalidSub.Finalizers = []string{maasSubscriptionFinalizer}
+	invalidSub.Status.Phase = maasv1alpha1.PhaseActive
+
+	trlp := newAcceptedTRLP(t, trlpName, namespace, modelName)
+
+	failNextStatusWrite := true
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRESTMapper(testRESTMapper()).
+		WithObjects(newMaaSModelRef(modelName, namespace, "ExternalModel", modelName), newHTTPRoute(httpRouteName, namespace), validSub, invalidSub, trlp).
+		WithStatusSubresource(&maasv1alpha1.MaaSSubscription{}).
+		WithIndex(&maasv1alpha1.MaaSSubscription{}, "spec.modelRef", subscriptionModelRefIndexer).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourceUpdate: func(ctx context.Context, cl client.Client, subResource string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+				if subResource == "status" && failNextStatusWrite {
+					failNextStatusWrite = false
+					return apierrors.NewConflict(maasv1alpha1.GroupVersion.WithResource("maassubscriptions").GroupResource(), obj.GetName(), errors.New("simulated conflict"))
+				}
+				return cl.SubResource(subResource).Update(ctx, obj, opts...)
+			},
+		}).
+		Build()
+
+	r := &MaaSSubscriptionReconciler{Client: c, Scheme: scheme}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: invalidSubName, Namespace: namespace}}
+	if _, err := r.Reconcile(t.Context(), req); !apierrors.IsConflict(err) {
+		t.Errorf("Reconcile = %v, want the injected conflict so the status write is retried", err)
+	}
+	if _, err := r.Reconcile(t.Context(), req); err != nil {
+		t.Fatalf("Reconcile retry: unexpected error: %v", err)
+	}
+
+	var sub maasv1alpha1.MaaSSubscription
+	if err := c.Get(t.Context(), req.NamespacedName, &sub); err != nil {
+		t.Fatalf("Get MaaSSubscription: %v", err)
+	}
+	if sub.Status.Phase != maasv1alpha1.PhaseDegraded {
+		t.Errorf("phase = %q, want %q", sub.Status.Phase, maasv1alpha1.PhaseDegraded)
+	}
+}
+
 // TestMaaSSubscriptionReconciler_NoTokenBudgetOnSharedModel covers a model reference with
 // neither tokenRateLimits nor unlimited, which subscriptions stored before tokenRateLimits
 // became required can still hold. It gets no limit in the model's TRLP, so like an
@@ -1813,6 +1876,65 @@ func TestMaaSSubscriptionReconciler_UnenforceableBudgetRecovers(t *testing.T) {
 	if sub.Status.Phase != maasv1alpha1.PhaseActive || len(sub.Status.TokenRateLimitStatuses) != 1 || !sub.Status.TokenRateLimitStatuses[0].Ready {
 		t.Errorf("status after the fix = %+v, want Active with a ready rate limit status", sub.Status)
 	}
+}
+
+// TestMaaSSubscriptionReconciler_TRLPFailureKeepsStatusError covers a TRLP failure followed
+// by a failed status write: Reconcile must return both, and a rejected status write must not
+// make the TRLP failure terminal, so the retry is not lost either way.
+func TestMaaSSubscriptionReconciler_TRLPFailureKeepsStatusError(t *testing.T) {
+	const namespace, modelName = "default", "llm"
+	tests := []struct {
+		name        string
+		statusErr   error
+		isStatusErr func(error) bool
+	}{
+		{
+			name:        "conflict",
+			statusErr:   apierrors.NewConflict(maasv1alpha1.GroupVersion.WithResource("maassubscriptions").GroupResource(), "sub", errors.New("simulated conflict")),
+			isStatusErr: apierrors.IsConflict,
+		},
+		{name: "rejected", statusErr: rejectedStatusWrite("sub"), isStatusErr: apierrors.IsInvalid},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sub := newMaaSSubscription("sub", namespace, "team-a", modelName, 1000)
+			c := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRESTMapper(testRESTMapper()).
+				WithObjects(newMaaSModelRef(modelName, namespace, "ExternalModel", modelName), newHTTPRoute("maas-"+modelName, namespace), sub).
+				WithStatusSubresource(&maasv1alpha1.MaaSSubscription{}).
+				WithIndex(&maasv1alpha1.MaaSSubscription{}, "spec.modelRef", subscriptionModelRefIndexer).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Create: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+						if obj.GetObjectKind().GroupVersionKind().Kind == "TokenRateLimitPolicy" {
+							return errors.New("simulated TRLP create failure")
+						}
+						return cl.Create(ctx, obj, opts...)
+					},
+					SubResourceUpdate: func(ctx context.Context, cl client.Client, subResource string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+						return tc.statusErr
+					},
+				}).
+				Build()
+
+			r := &MaaSSubscriptionReconciler{Client: c, Scheme: scheme}
+			_, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "sub", Namespace: namespace}})
+			if !tc.isStatusErr(err) || !strings.Contains(fmt.Sprint(err), "simulated TRLP create failure") {
+				t.Errorf("Reconcile = %v, want both the TRLP failure and the status error", err)
+			}
+			if errors.Is(err, reconcile.TerminalError(nil)) {
+				t.Errorf("Reconcile = %v is terminal, want the TRLP failure retried", err)
+			}
+		})
+	}
+}
+
+// rejectedStatusWrite is how an API server before Kubernetes 1.33 answers a status write for
+// a subscription stored with a model reference that has no token budget.
+func rejectedStatusWrite(name string) error {
+	return apierrors.NewInvalid(maasv1alpha1.GroupVersion.WithKind("MaaSSubscription").GroupKind(), name, field.ErrorList{
+		field.Invalid(field.NewPath("spec", "modelRefs").Index(0), "object", "tokenRateLimits is required unless unlimited is true"),
+	})
 }
 
 func modelStatus(ns, name string, ready bool, reason maasv1alpha1.ConditionReason) maasv1alpha1.ModelRefStatus {
