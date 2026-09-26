@@ -721,15 +721,16 @@ def _inference(api_key, path=None, extra_headers=None, model_name=None, max_toke
     )
 
 
-def _poll_status(api_key, expected, path=None, extra_headers=None, model_name=None, timeout=None, poll_interval=2):
+def _poll_status(api_key, expected, path=None, extra_headers=None, model_name=None, timeout=None, poll_interval=2, inference_fn=None):
     """Poll inference endpoint until expected HTTP status or timeout."""
+    inference_fn = inference_fn or _inference
     timeout = timeout or max(RECONCILE_WAIT * 3, 60)
     deadline = time.time() + timeout
     last = None
     last_err = None
     while time.time() < deadline:
         try:
-            r = _inference(api_key, path=path, extra_headers=extra_headers, model_name=model_name)
+            r = inference_fn(api_key, path=path, extra_headers=extra_headers, model_name=model_name)
             last_err = None
             ok = r.status_code == expected if isinstance(expected, int) else r.status_code in expected
             if ok:

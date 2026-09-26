@@ -851,6 +851,7 @@ run_e2e_tests() {
         "$test_dir/tests/test_namespace_scoping.py" \
         "$test_dir/tests/test_negative_security.py" \
         "$test_dir/tests/test_subscription.py" \
+        "$test_dir/tests/test_trlp_rate_grouping.py" \
         "$test_dir/tests/test_models_endpoint.py" \
         "$test_dir/tests/test_external_models.py" \
         "$test_dir/tests/test_tenant.py" \
