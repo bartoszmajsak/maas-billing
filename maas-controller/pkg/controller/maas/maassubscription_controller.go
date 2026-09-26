@@ -539,14 +539,6 @@ func (r *MaaSSubscriptionReconciler) reconcileTRLPForModel(ctx context.Context, 
 		return fmt.Errorf("failed to fetch HTTPRoute %s/%s: %w", httpRouteNS, httpRouteName, err)
 	}
 
-	limitsMap := map[string]any{}
-	var subNames []string
-
-	type subInfo struct {
-		sub   maasv1alpha1.MaaSSubscription
-		mRef  maasv1alpha1.ModelSubscriptionRef
-		rates []any
-	}
 	var subs []subInfo
 	for _, sub := range allSubs {
 		for _, mRef := range sub.Spec.ModelRefs {
@@ -576,7 +568,13 @@ func (r *MaaSSubscriptionReconciler) reconcileTRLPForModel(ctx context.Context, 
 				// so the invalid subscription cannot be used for API key minting.
 				continue
 			}
-			subs = append(subs, subInfo{sub: sub, mRef: mRef, rates: rates})
+			subs = append(subs, subInfo{
+				subNamespace: sub.Namespace,
+				subName:      sub.Name,
+				rates:        rates,
+				modelScoped:  fmt.Sprintf("%s/%s@%s/%s", sub.Namespace, sub.Name, mRef.Namespace, mRef.Name),
+				groupKey:     rateGroupKey(rates),
+			})
 			break
 		}
 	}
@@ -599,34 +597,14 @@ func (r *MaaSSubscriptionReconciler) reconcileTRLPForModel(ctx context.Context, 
 	//
 	// The selected_subscription_key format is: {subNamespace}/{subName}@{modelNamespace}/{modelName}
 	// This ensures proper isolation between subscriptions in different namespaces and across models.
-	for _, si := range subs {
-		subNames = append(subNames, qualifiedName(si.sub.Namespace, si.sub.Name))
-
-		// Build subscription reference: namespace/name
-		subRef := fmt.Sprintf("%s/%s", si.sub.Namespace, si.sub.Name)
-		// Build model-scoped reference: subscription@model
-		modelScopedRef := fmt.Sprintf("%s@%s/%s", subRef, si.mRef.Namespace, si.mRef.Name)
-
-		// TRLP limit key must be safe for YAML (no slashes)
-		safeKey := strings.ReplaceAll(subRef, "/", "-")
-		limitsMap[fmt.Sprintf("%s-%s-tokens", safeKey, si.mRef.Name)] = map[string]any{
-			"rates": si.rates,
-			"when": []any{
-				map[string]any{
-					// Exempt /v1/models endpoint from token rate limiting.
-					// This endpoint is used for model discovery/metadata and does not consume inference tokens.
-					// Users should be able to query model capabilities even when their token quota is exhausted.
-					"predicate": fmt.Sprintf(`auth.identity.selected_subscription_key == "%s" && !request.path.endsWith("/v1/models")`, modelScopedRef),
-				},
-			},
-			"counters": []any{
-				map[string]any{"expression": "auth.identity.userid"},
-			},
-		}
-	}
-
-	// Sort subscription names for stable annotation value across reconciles
-	sort.Strings(subNames)
+	//
+	// Subscriptions sharing identical rates share one limit instead of one each, so the TRLP
+	// (and the EnvoyFilter/WasmPlugin Kuadrant renders from it, which repeats every limit per
+	// route match) grows with the number of distinct rate sets, not with the number of
+	// subscriptions behind them (RHOAIENG-95277). The predicate lists every subscription in
+	// the group; counters key on selected_subscription_key as well as userid so subscriptions
+	// sharing a limit still get independent budgets. See buildGroupedLimits.
+	limitsMap, subNames := buildGroupedLimits(subs)
 
 	// Build the aggregated TokenRateLimitPolicy (one per model, covering all subscriptions)
 	// policyName already declared during early opt-out check
