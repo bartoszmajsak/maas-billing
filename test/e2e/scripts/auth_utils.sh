@@ -346,9 +346,13 @@ collect_namespace_pod_logs() {
   local outdir="${2:-$ARTIFACTS_DIR/pod-logs}"
   mkdir -p "$outdir"
   echo "Collecting pod logs from namespace $ns to $outdir"
-  local pod container pods_json
+  local pod container pods_json log_tail
+  # A 500-line tail covers only minutes of these controllers' logs, and the
+  # serial pass replaces their pods, so keep all of it for failure timelines.
+  local full_log_pods='^(kuadrant-operator-controller-manager|maas-controller)-[a-z0-9]+-[a-z0-9]{5}$'
   for pod in $(kubectl get pods -n "$ns" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
-    kubectl logs -n "$ns" "$pod" --all-containers --tail=500 2>/dev/null | redact_tokens > "${outdir}/${pod}.log" || true
+    log_tail=500; [[ "$pod" =~ $full_log_pods ]] && log_tail=-1
+    kubectl logs -n "$ns" "$pod" --all-containers --tail="$log_tail" 2>/dev/null | redact_tokens > "${outdir}/${pod}.log" || true
   done
   # Restarts and their cause (e.g. OOMKilled) live only in pod status, and the
   # crashed container's logs only behind --previous.
@@ -360,7 +364,8 @@ collect_namespace_pod_logs() {
        "finishedAt=\(.lastState.terminated.finishedAt // "-")"]
     | @tsv' <<<"$pods_json" > "${outdir}/pods.txt" 2>/dev/null || true
   while read -r pod container; do
-    kubectl logs -n "$ns" "$pod" -c "$container" --previous --tail=500 2>/dev/null \
+    log_tail=500; [[ "$pod" =~ $full_log_pods ]] && log_tail=-1
+    kubectl logs -n "$ns" "$pod" -c "$container" --previous --tail="$log_tail" 2>/dev/null \
       | redact_tokens > "${outdir}/${pod}.${container}.previous.log" || true
   done < <(jq -r '.items[] | .metadata.name as $pod | .status.containerStatuses[]?
     | select(.restartCount > 0) | "\($pod) \(.name)"' <<<"$pods_json" 2>/dev/null || true)
