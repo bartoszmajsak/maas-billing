@@ -59,9 +59,9 @@ var _ = Describe("Tenant operands", func() {
 				})
 			})
 		},
-		Entry("from the OpenShift overlay with bundled Postgres", fixture.WithOverlay("odh"), fixture.WithBundledPostgres(true)),
-		Entry("from the OpenShift overlay with an external database", fixture.WithOverlay("odh"), fixture.WithBundledPostgres(false)),
-		Entry("from the Kubernetes overlay", fixture.WithOverlay("xks")),
+		Entry("from the OpenShift overlay with bundled Postgres", fixture.WithOverlay("odh"), fixture.WithBundledPostgres()),
+		Entry("from the OpenShift overlay with an external database", fixture.WithOverlay("odh")),
+		Entry("from the Kubernetes overlay", fixture.WithOverlay("xks"), fixture.WithBundledPostgres()),
 	)
 })
 

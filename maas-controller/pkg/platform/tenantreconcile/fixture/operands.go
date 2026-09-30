@@ -31,10 +31,10 @@ func WithOverlay(name string) RenderOption {
 	}
 }
 
-// WithBundledPostgres renders for the in-cluster Postgres or for an external database.
-func WithBundledPostgres(bundled bool) RenderOption {
+// WithBundledPostgres renders for the in-cluster Postgres instead of an external database.
+func WithBundledPostgres() RenderOption {
 	return func(cfg *renderConfig) {
-		cfg.params.BundledPostgres = bundled
+		cfg.params.BundledPostgres = true
 	}
 }
 
@@ -77,7 +77,6 @@ func RenderDefaultTenant(ctx context.Context, opts ...RenderOption) []unstructur
 			PayloadProcessingImage:  "quay.io/example/payload:test",
 			MaaSAPIKeyCleanupImage:  "quay.io/example/cleanup:test",
 			APIKeyMaxExpirationDays: "45",
-			BundledPostgres:         true,
 		},
 	}
 	for _, opt := range opts {
