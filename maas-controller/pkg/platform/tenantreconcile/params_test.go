@@ -666,6 +666,11 @@ func TestRenderKustomizeRemapsServiceMonitorServerName(t *testing.T) {
 
 func renderOverlayResources(t *testing.T, appNamespace string) []unstructured.Unstructured {
 	t.Helper()
+	return renderOverlay(t, "odh", appNamespace)
+}
+
+func renderOverlay(t *testing.T, overlay, appNamespace string) []unstructured.Unstructured {
+	t.Helper()
 
 	_, currentFile, _, ok := runtime.Caller(0)
 	require.True(t, ok)
@@ -673,13 +678,77 @@ func renderOverlayResources(t *testing.T, appNamespace string) []unstructured.Un
 	overlayDir := filepath.Clean(filepath.Join(
 		filepath.Dir(currentFile),
 		"..", "..", "..", "..",
-		"maas-api", "deploy", "overlays", "odh",
+		"maas-api", "deploy", "overlays", overlay,
 	))
 
 	resources, err := RenderKustomize(overlayDir, appNamespace)
 	require.NoError(t, err)
 
 	return resources
+}
+
+func TestRenderedResourcesHaveNoEmptyLists(t *testing.T) {
+	// The API server stores an empty list as nil. Kinds whose update strategy compares
+	// specs with reflect.DeepEqual (NetworkPolicy among them) then bump generation on
+	// every server-side apply, and a watched operand turns that into a reconcile loop.
+	for _, overlay := range []string{"odh", "xks"} {
+		t.Run(overlay, func(t *testing.T) {
+			requireNoEmptyLists(t, renderOverlay(t, overlay, "odh-ai-gateway-infra"))
+		})
+	}
+
+	for _, bundledPostgres := range []bool{true, false} {
+		t.Run(fmt.Sprintf("post-render bundledPostgres=%t", bundledPostgres), func(t *testing.T) {
+			tenant := &maasv1alpha1.MaasTenantConfig{
+				ObjectMeta: metav1.ObjectMeta{Name: maasv1alpha1.MaasTenantConfigInstanceName, Namespace: "models-as-a-service"},
+			}
+			params := PlatformParams{ //nolint:gosec // APIKeyMaxExpirationDays is a duration setting, not a secret
+				AppNamespace:            "odh-ai-gateway-infra",
+				ControllerNamespace:     "controller-ns",
+				GatewayNamespace:        "openshift-ingress",
+				GatewayName:             "maas-default-gateway",
+				MonitoringNamespace:     "opendatahub",
+				SubscriptionNamespace:   "models-as-a-service",
+				MaaSAPIImage:            "quay.io/example/maas-api:test",
+				PayloadProcessingImage:  "quay.io/example/payload:test",
+				MaaSAPIKeyCleanupImage:  "quay.io/example/cleanup:test",
+				APIKeyMaxExpirationDays: "45",
+				BundledPostgres:         bundledPostgres,
+			}
+
+			resources, err := PostRender(t.Context(), logr.Discard(), tenant, renderOverlayResources(t, params.AppNamespace), params)
+			require.NoError(t, err)
+			requireNoEmptyLists(t, resources)
+		})
+	}
+}
+
+func requireNoEmptyLists(t *testing.T, resources []unstructured.Unstructured) {
+	t.Helper()
+
+	require.NotEmpty(t, resources)
+	requireResource(t, resources, GVKNetworkPolicy, "maas-api-cleanup-restrict")
+	for _, r := range resources {
+		assert.Empty(t, emptyListPaths(r.Object, ""), "%s %s", r.GetKind(), r.GetName())
+	}
+}
+
+func emptyListPaths(v any, path string) []string {
+	var paths []string
+	switch v := v.(type) {
+	case map[string]any:
+		for k, child := range v {
+			paths = append(paths, emptyListPaths(child, strings.TrimPrefix(path+"."+k, "."))...)
+		}
+	case []any:
+		if len(v) == 0 {
+			return []string{path}
+		}
+		for i, child := range v {
+			paths = append(paths, emptyListPaths(child, fmt.Sprintf("%s[%d]", path, i))...)
+		}
+	}
+	return paths
 }
 
 func requireResource(t *testing.T, resources []unstructured.Unstructured, gvk schema.GroupVersionKind, name string) *unstructured.Unstructured {
