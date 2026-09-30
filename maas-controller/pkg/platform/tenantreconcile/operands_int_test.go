@@ -7,6 +7,7 @@ import (
 
 	"github.com/opendatahub-io/models-as-a-service/maas-controller/pkg/platform/tenantreconcile"
 	"github.com/opendatahub-io/models-as-a-service/maas-controller/pkg/platform/tenantreconcile/fixture"
+	pkgtest "github.com/opendatahub-io/models-as-a-service/maas-controller/pkg/testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -21,8 +22,8 @@ var _ = Describe("Tenant operands", func() {
 			)
 
 			BeforeEach(func(ctx SpecContext) {
-				appNamespace = fixture.NewTestNamespace(ctx, envTest).Name
-				gatewayNamespace := fixture.NewTestNamespace(ctx, envTest, fixture.WithNameSuffix("gateway")).Name
+				appNamespace = pkgtest.NewTestNamespace(ctx, envTest).Name
+				gatewayNamespace := pkgtest.NewTestNamespace(ctx, envTest, pkgtest.WithNameSuffix("gateway")).Name
 				operands = fixture.RenderDefaultTenant(ctx, append(opts, fixture.InNamespaces(appNamespace, gatewayNamespace))...)
 			})
 

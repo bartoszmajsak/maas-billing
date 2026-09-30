@@ -1,4 +1,4 @@
-package fixture
+package testing
 
 import (
 	"context"
@@ -11,8 +11,6 @@ import (
 	"github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	pkgtest "github.com/opendatahub-io/models-as-a-service/maas-controller/pkg/testing"
 )
 
 // TestNamespace is a namespace owned by the current spec.
@@ -37,7 +35,7 @@ func WithNameSuffix(suffix string) TestNamespaceOption {
 // NewTestNamespace creates a namespace named after the current spec. envtest runs no
 // namespace controller, so a deleted namespace never finishes terminating; specs get
 // unique names instead of cleanup.
-func NewTestNamespace(ctx context.Context, c *pkgtest.Client, opts ...TestNamespaceOption) *TestNamespace {
+func NewTestNamespace(ctx context.Context, c *Client, opts ...TestNamespaceOption) *TestNamespace {
 	cfg := &testNamespaceConfig{}
 	for _, opt := range opts {
 		opt(cfg)
