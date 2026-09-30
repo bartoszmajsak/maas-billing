@@ -192,30 +192,6 @@ func (r *TenantReconciler) enqueueTenantForAITenant(_ context.Context, obj clien
 	}}}
 }
 
-// mapConfigToMaasTenantConfigs maps a Config change to reconcile requests for MaasTenantConfig
-// resources so usageLogging toggle changes propagate to every tenant's usage-logs EnvoyFilter.
-func (r *TenantReconciler) mapConfigToMaasTenantConfigs(ctx context.Context, _ client.Object) []reconcile.Request {
-	if !r.TenantNamespaceDiscoveryEnabled {
-		return []reconcile.Request{{NamespacedName: types.NamespacedName{
-			Name:      maasv1alpha1.MaasTenantConfigInstanceName,
-			Namespace: r.TenantNamespace,
-		}}}
-	}
-
-	var tenantList maasv1alpha1.MaasTenantConfigList
-	if err := r.List(ctx, &tenantList); err != nil {
-		oteljson.FromContext(ctx).Error(err, "failed to list MaasTenantConfigs for Config change mapping")
-		return nil
-	}
-	requests := make([]reconcile.Request, 0, len(tenantList.Items))
-	for i := range tenantList.Items {
-		requests = append(requests, reconcile.Request{
-			NamespacedName: client.ObjectKeyFromObject(&tenantList.Items[i]),
-		})
-	}
-	return requests
-}
-
 // crdLabeledForMaaSComponent matches CRDs labeled app.opendatahub.io/modelsasservice=true.
 func crdLabeledForMaaSComponent() predicate.Predicate {
 	key := tenantreconcile.LabelODHAppPrefix + "/" + tenantreconcile.ComponentName
@@ -267,7 +243,7 @@ func isManagedTenantNetworkPolicyLabels(labels map[string]string) bool {
 	case "models-as-a-service", "maas":
 		return true
 	}
-	return labels[tenantreconcile.LabelTenantName] != "" || labels[tenantreconcile.LabelTenantNamespace] != ""
+	return hasTenantTrackingLabels(labels)
 }
 
 func (r *TenantReconciler) isTenantPlatformNamespace(ns string) bool {
@@ -312,9 +288,10 @@ func (r *TenantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	b := ctrl.NewControllerManagedBy(mgr).
 		For(&maasv1alpha1.MaasTenantConfig{}).
+		// Config changes (e.g. the usageLogging toggle) apply to every tenant's operands.
 		Watches(
 			&maasv1alpha1.Config{},
-			handler.EnqueueRequestsFromMapFunc(r.mapConfigToMaasTenantConfigs),
+			handler.EnqueueRequestsFromMapFunc(r.enqueueAllTenants),
 			builder.WithPredicates(configResourceDefault()),
 		).
 		Watches(
@@ -328,7 +305,7 @@ func (r *TenantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		).
 		Watches(
 			&corev1.Secret{},
-			handler.EnqueueRequestsFromMapFunc(r.enqueueDefaultTenant),
+			handler.EnqueueRequestsFromMapFunc(r.enqueueAllTenants),
 			builder.WithPredicates(secretNamedMaaSDB(), r.inTenantWorkNamespaces()),
 		).
 		Watches(
@@ -400,5 +377,5 @@ func (r *TenantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}
 	}
 
-	return nil
+	return r.setupTenantPlatformWatches(ctx, c, mgr)
 }
