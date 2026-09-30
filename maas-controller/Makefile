@@ -69,7 +69,7 @@ run: binary ##	build and run manager locally
 
 .PHONY: setup-envtest
 setup-envtest: $(SETUP_ENVTEST) ##	download the envtest binaries for ENVTEST_K8S_VERSION
-	"$(SETUP_ENVTEST)" use "$(ENVTEST_K8S_VERSION)" --bin-dir "$(LOCALBIN)" -p path
+	"$(SETUP_ENVTEST)" use "$(ENVTEST_K8S_VERSION)" --bin-dir "$(LOCALBIN)"
 
 # setup-envtest stops the build when the binaries cannot be downloaded; the lookup
 # below only reads what it installed (-i), so it cannot fail on the network.
