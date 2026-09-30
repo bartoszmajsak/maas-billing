@@ -67,12 +67,16 @@ $(BUILD_DIR):
 run: binary ##	build and run manager locally
 	"$(BUILD_DIR)/$(BINARY_NAME)"
 
+.PHONY: setup-envtest
+setup-envtest: $(SETUP_ENVTEST) ##	download the envtest binaries for ENVTEST_K8S_VERSION
+	"$(SETUP_ENVTEST)" use "$(ENVTEST_K8S_VERSION)" --bin-dir "$(LOCALBIN)" -p path
+
+# setup-envtest stops the build when the binaries cannot be downloaded; the lookup
+# below only reads what it installed (-i), so it cannot fail on the network.
 TEST_FLAGS ?= -race -coverprofile=coverage.out
 .PHONY: test
-test: tidy $(SETUP_ENVTEST) ##	run tests with coverage, including envtest-backed tests
-	assets="$$("$(SETUP_ENVTEST)" use "$(ENVTEST_K8S_VERSION)" --bin-dir "$(LOCALBIN)" -p path)" || { echo "setup-envtest failed for Kubernetes $(ENVTEST_K8S_VERSION)" >&2; exit 1; }; \
-	if [ -z "$$assets" ]; then echo "setup-envtest returned no asset path for Kubernetes $(ENVTEST_K8S_VERSION)" >&2; exit 1; fi; \
-	KUBEBUILDER_ASSETS="$$assets" go test $(TEST_FLAGS) ./...
+test: tidy setup-envtest ##	run tests with coverage, including envtest-backed tests
+	KUBEBUILDER_ASSETS="$$("$(SETUP_ENVTEST)" use "$(ENVTEST_K8S_VERSION)" --bin-dir "$(LOCALBIN)" -i -p path)" go test $(TEST_FLAGS) ./...
 	@go tool cover -html=coverage.out -o coverage.html
 	@echo "Test coverage report generated: $(abspath coverage.html)"
 
