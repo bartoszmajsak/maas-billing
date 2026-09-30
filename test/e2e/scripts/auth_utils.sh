@@ -116,7 +116,7 @@ MAAS_API_DEPLOYMENT_NAMESPACE="${MAAS_API_DEPLOYMENT_NAMESPACE:-$(_auth_debug_re
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-${ARTIFACT_DIR:-${ARTIFACTS:-${LOG_DIR:-$PROJECT_ROOT/test/e2e/reports}}}}"
 
 # -----------------------------------------------------------------------------
-# Redact token-like values from log output (JWT, Bearer tokens, token fields,
+# Redact token-like values from log output (JWT, MaaS API keys, Bearer tokens, token fields,
 # and common secret environment variable values in YAML/JSON)
 # -----------------------------------------------------------------------------
 redact_tokens() {
@@ -124,7 +124,8 @@ redact_tokens() {
     -e 's/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/****REDACTED_JWT****/g' \
     -e 's/"token":"[^"]*"/"token":"****"/g' \
     -e 's/"token": "[^"]*"/"token": "****"/g' \
-    -e 's/(Bearer )[^[:space:]]+/\1****/g' \
+    -e 's/sk-oai-[A-Za-z0-9_-]+/sk-oai-****/g' \
+    -e 's/(Bearer )[^[:space:]",\\]+/\1****/g' \
     -e 's/("spec":\s*\{[^}]*"token":\s*)"[^"]*"/\1"****"/g' \
     -e 's/token=[A-Za-z0-9_-]+\.?[A-Za-z0-9_-]*\.?[A-Za-z0-9_-]*/token=****/g' \
     -e 's/(name:\s*(HF_TOKEN|HUGGING_FACE_HUB_TOKEN|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|AZURE_CLIENT_SECRET|API_KEY|SECRET_KEY|PASSWORD|CREDENTIALS)[[:space:]]*$)/\1/g' \
