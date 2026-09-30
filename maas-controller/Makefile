@@ -69,8 +69,8 @@ run: binary ##	build and run manager locally
 
 TEST_FLAGS ?= -race -coverprofile=coverage.out
 .PHONY: test
-test: tidy ##	run tests with coverage
-	go test $(TEST_FLAGS) ./...
+test: tidy $(SETUP_ENVTEST) ##	run tests with coverage, including envtest-backed tests
+	KUBEBUILDER_ASSETS="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $(TEST_FLAGS) ./...
 	@go tool cover -html=coverage.out -o coverage.html
 	@echo "Test coverage report generated: $(abspath coverage.html)"
 

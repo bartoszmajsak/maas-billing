@@ -699,28 +699,36 @@ func TestRenderedResourcesHaveNoEmptyLists(t *testing.T) {
 
 	for _, bundledPostgres := range []bool{true, false} {
 		t.Run(fmt.Sprintf("post-render bundledPostgres=%t", bundledPostgres), func(t *testing.T) {
-			tenant := &maasv1alpha1.MaasTenantConfig{
-				ObjectMeta: metav1.ObjectMeta{Name: maasv1alpha1.MaasTenantConfigInstanceName, Namespace: "models-as-a-service"},
-			}
-			params := PlatformParams{ //nolint:gosec // APIKeyMaxExpirationDays is a duration setting, not a secret
-				AppNamespace:            "odh-ai-gateway-infra",
-				ControllerNamespace:     "controller-ns",
-				GatewayNamespace:        "openshift-ingress",
-				GatewayName:             "maas-default-gateway",
-				MonitoringNamespace:     "opendatahub",
-				SubscriptionNamespace:   "models-as-a-service",
-				MaaSAPIImage:            "quay.io/example/maas-api:test",
-				PayloadProcessingImage:  "quay.io/example/payload:test",
-				MaaSAPIKeyCleanupImage:  "quay.io/example/cleanup:test",
-				APIKeyMaxExpirationDays: "45",
-				BundledPostgres:         bundledPostgres,
-			}
-
-			resources, err := PostRender(t.Context(), logr.Discard(), tenant, renderOverlayResources(t, params.AppNamespace), params)
-			require.NoError(t, err)
-			requireNoEmptyLists(t, resources)
+			requireNoEmptyLists(t, renderDefaultTenant(t, "odh-ai-gateway-infra", bundledPostgres))
 		})
 	}
+}
+
+// renderDefaultTenant renders and post-renders the odh overlay the way the default
+// tenant reconcile does, with placeholder images.
+func renderDefaultTenant(t *testing.T, appNamespace string, bundledPostgres bool) []unstructured.Unstructured {
+	t.Helper()
+
+	tenant := &maasv1alpha1.MaasTenantConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: maasv1alpha1.MaasTenantConfigInstanceName, Namespace: "models-as-a-service"},
+	}
+	params := PlatformParams{ //nolint:gosec // APIKeyMaxExpirationDays is a duration setting, not a secret
+		AppNamespace:            appNamespace,
+		ControllerNamespace:     "controller-ns",
+		GatewayNamespace:        "openshift-ingress",
+		GatewayName:             "maas-default-gateway",
+		MonitoringNamespace:     "opendatahub",
+		SubscriptionNamespace:   "models-as-a-service",
+		MaaSAPIImage:            "quay.io/example/maas-api:test",
+		PayloadProcessingImage:  "quay.io/example/payload:test",
+		MaaSAPIKeyCleanupImage:  "quay.io/example/cleanup:test",
+		APIKeyMaxExpirationDays: "45",
+		BundledPostgres:         bundledPostgres,
+	}
+
+	resources, err := PostRender(t.Context(), logr.Discard(), tenant, renderOverlayResources(t, appNamespace), params)
+	require.NoError(t, err)
+	return resources
 }
 
 func requireNoEmptyLists(t *testing.T, resources []unstructured.Unstructured) {
