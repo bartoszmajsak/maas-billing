@@ -192,6 +192,30 @@ func (r *TenantReconciler) enqueueTenantForAITenant(_ context.Context, obj clien
 	}}}
 }
 
+// enqueueAllTenants maps a change that applies to every tenant to all the
+// MaasTenantConfigs this reconciler owns.
+func (r *TenantReconciler) enqueueAllTenants(ctx context.Context, _ client.Object) []reconcile.Request {
+	if !r.TenantNamespaceDiscoveryEnabled {
+		return []reconcile.Request{{NamespacedName: types.NamespacedName{
+			Name:      maasv1alpha1.MaasTenantConfigInstanceName,
+			Namespace: r.TenantNamespace,
+		}}}
+	}
+
+	var tenantList maasv1alpha1.MaasTenantConfigList
+	if err := r.List(ctx, &tenantList); err != nil {
+		oteljson.FromContext(ctx).Error(err, "failed to list MaasTenantConfigs for fan-out mapping")
+		return nil
+	}
+	requests := make([]reconcile.Request, 0, len(tenantList.Items))
+	for i := range tenantList.Items {
+		requests = append(requests, reconcile.Request{
+			NamespacedName: client.ObjectKeyFromObject(&tenantList.Items[i]),
+		})
+	}
+	return requests
+}
+
 // crdLabeledForMaaSComponent matches CRDs labeled app.opendatahub.io/modelsasservice=true.
 func crdLabeledForMaaSComponent() predicate.Predicate {
 	key := tenantreconcile.LabelODHAppPrefix + "/" + tenantreconcile.ComponentName

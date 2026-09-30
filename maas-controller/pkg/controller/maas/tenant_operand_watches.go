@@ -523,30 +523,6 @@ func (r *TenantReconciler) mapDeletedTenantChildToMaasTenantConfig(ctx context.C
 	return []reconcile.Request{{NamespacedName: key}}
 }
 
-// enqueueAllTenants maps a cluster-wide input (Config, dependency CRDs, prerequisites)
-// to every tenant config the reconciler acts on.
-func (r *TenantReconciler) enqueueAllTenants(ctx context.Context, _ client.Object) []reconcile.Request {
-	if !r.TenantNamespaceDiscoveryEnabled {
-		return []reconcile.Request{{NamespacedName: types.NamespacedName{
-			Name:      maasv1alpha1.MaasTenantConfigInstanceName,
-			Namespace: r.TenantNamespace,
-		}}}
-	}
-
-	var tenantList maasv1alpha1.MaasTenantConfigList
-	if err := r.List(ctx, &tenantList); err != nil {
-		oteljson.FromContext(ctx).Error(err, "failed to list MaasTenantConfigs for fan-out mapping")
-		return nil
-	}
-	requests := make([]reconcile.Request, 0, len(tenantList.Items))
-	for i := range tenantList.Items {
-		requests = append(requests, reconcile.Request{
-			NamespacedName: client.ObjectKeyFromObject(&tenantList.Items[i]),
-		})
-	}
-	return requests
-}
-
 func crdNamed(names ...string) predicate.Funcs {
 	return predicate.NewPredicateFuncs(func(o client.Object) bool {
 		return slices.Contains(names, o.GetName())
