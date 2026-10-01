@@ -175,6 +175,7 @@ The E2E framework auto-discovers most values from the cluster. These are the mos
 | `MODEL_NAME` | Override model ID (defaults to first from catalog) |
 | `EXTERNAL_OIDC` | Set `true` to enable external OIDC tests |
 | `E2E_PARALLEL_WORKERS` | pytest-xdist worker count for pass 1 (default `7`). Set to `1` for single-worker pass 1 without xdist; pass 2 stays serial. |
+| `LLMISVC_CONTROLLER_CPU_REQUEST` / `LLMISVC_CONTROLLER_CPU_LIMIT` | CPU that `deploy-platform.sh` gives `llmisvc-controller-manager` on the test cluster (defaults `1` / `2`; shipped is 100m). Set the limit empty to keep the shipped resources. |
 
 See `test/e2e/tests/conftest.py` and individual test module docstrings for the full set of supported variables.
 
