@@ -185,7 +185,7 @@ def _route_rule_authconfig_observations(
 
 
 def _wait_for_stable_route_authconfigs(
-    route: dict,
+    route: dict, expected_per_rule: int
 ) -> dict[str, list[_AuthConfigObservation]]:
     namespace = (route.get("metadata") or {}).get("namespace", INFRA_NAMESPACE)
     route_name = (route.get("metadata") or {}).get("name", "")
@@ -204,8 +204,10 @@ def _wait_for_stable_route_authconfigs(
             rule: tuple(sorted((o.name, o.uid, o.generation) for o in observations))
             for rule, observations in sorted(last_by_rule.items())
         }
+        # Wait for every listener's AuthConfig, not just the first Ready one.
         complete = set(last_by_rule) == expected_rules and all(
-            o.ready for observations in last_by_rule.values() for o in observations
+            len(observations) >= expected_per_rule and all(o.ready for o in observations)
+            for observations in last_by_rule.values()
         )
         now = time.monotonic()
         if not complete:
@@ -220,7 +222,8 @@ def _wait_for_stable_route_authconfigs(
     raise AssertionError(
         f"AuthConfig state for {namespace}/{route_name} did not settle within "
         f"{AUTHCONFIG_SETTLE_TIMEOUT}s; "
-        f"expected rules={expected_rules!r}, observed={last_by_rule!r}"
+        f"expected rules={expected_rules!r} with {expected_per_rule} AuthConfig(s) each, "
+        f"observed={last_by_rule!r}"
     )
 
 
@@ -393,11 +396,13 @@ class TestPerTenantMaaSAPI:
             f"Test setup must use a shared hostname across listeners: {listeners!r}"
         )
 
-        authconfigs_by_rule = _wait_for_stable_route_authconfigs(route)
+        listeners_with_routes = _gateway_listener_names_with_routes(gateway)
+        authconfigs_by_rule = _wait_for_stable_route_authconfigs(
+            route, len(listeners_with_routes)
+        )
         rules = (route.get("spec") or {}).get("rules") or []
         expected_rules = {f"rule-{index}" for index in range(1, len(rules) + 1)}
         assert set(authconfigs_by_rule) == expected_rules
-        listeners_with_routes = _gateway_listener_names_with_routes(gateway)
         assert all(
             len(observations) == len(listeners_with_routes)
             and all(o.ready for o in observations)
@@ -414,5 +419,8 @@ class TestPerTenantMaaSAPI:
     ):
         """The overlapping listeners must not trigger Kuadrant wasm config churn."""
         # Start the quiet window from settled AuthConfigs, independent of test order.
-        _wait_for_stable_route_authconfigs(dual_listener_tenant_case.route)
+        _wait_for_stable_route_authconfigs(
+            dual_listener_tenant_case.route,
+            len(_gateway_listener_names_with_routes(dual_listener_tenant_case.gateway)),
+        )
         _assert_gateway_wasm_generation_stable(dual_listener_tenant_case.case["gateway_name"])
