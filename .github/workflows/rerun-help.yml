@@ -46,15 +46,33 @@ jobs:
                   pr.head.repo?.id !== run.head_repository.id) continue;
               const marker = '<!-- maas-rerun-help -->';
               const guide = `https://github.com/${owner}/${repo}/blob/HEAD/CONTRIBUTING.md#retrying-github-actions`;
+              const workflowName = run.name.replace(/[\\`*_{}[\]()<>#+.!|]/g, '\\$&').replace(/[\r\n]/g, ' ');
               const body = [
                 marker,
-                `A GitHub Actions [workflow failed](${run.html_url}) for commit ${run.head_sha.slice(0, 12)}.`,
+                `### ${workflowName} failed`,
                 '',
-                'Check the logs first. For a transient failure, an owner, organization member, collaborator, or previous contributor can comment `/rerun-failed`.',
+                `1. **[Inspect the failure](${run.html_url})** for commit \`${run.head_sha.slice(0, 12)}\`. Fix code, lint, or test errors before retrying.`,
+                '2. **For a transient failure, post a new PR comment:**',
                 '',
-                'Use `/rerun-all` to retry all jobs in failed or cancelled workflows, or `/rerun-workflow <name>` for one workflow. Put the command on its own line.',
+                '```text',
+                '/rerun-failed',
+                '```',
                 '',
-                `See [retry instructions](${guide}) for scope and permissions. These commands do not retry Konflux/Prow checks or approve blocked workflows.`,
+                '<details>',
+                '<summary>Other retry options and who can use them</summary>',
+                '',
+                '| To retry… | Post this as a new PR comment |',
+                '|---|---|',
+                '| All jobs in failed or cancelled workflows | `/rerun-all` |',
+                '| One failed or cancelled workflow | `/rerun-workflow "workflow name"` |',
+                '',
+                'Owners, organization members, collaborators, and previous contributors can use these commands. If you are new to this repository, ask a maintainer to post the command.',
+                '',
+                'These commands retry GitHub Actions for the latest PR commit. They do not retry Konflux/Prow checks or approve blocked workflows.',
+                '',
+                `[Full retry guide](${guide})`,
+                '',
+                '</details>',
               ].join('\n');
               const comments = await github.paginate(github.rest.issues.listComments, {
                 owner, repo, issue_number: pr.number, per_page: 100,
