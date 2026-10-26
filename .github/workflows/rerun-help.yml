@@ -3,18 +3,8 @@ name: PR Workflow Retry Help
 on:
   workflow_run:
     workflows:
-      - Actionlint
-      - Build
-      - Deploy Documentation to GitHub Pages
-      - Disconnected Readiness
-      - E2E collection
-      - MaaS API
-      - MaaS Controller
-      - OpenAPI Validation
-      - Operator Chaos
-      - PR Title Validation
-      - Semgrep TLS Rules
-      - TLS Config Lint
+      - "*"
+      - "!PR Workflow Retry Help"
     types: [completed]
 
 permissions: {}
