@@ -56,9 +56,11 @@ jobs:
               ;;
           esac
 
-          HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid)
-          if [ -z "$HEAD_SHA" ]; then
-            echo "::error::Failed to resolve HEAD SHA for PR #${PR_NUMBER}"
+          PR_HEAD=$(gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}" \
+            --jq '[.head.sha, .head.repo.id, .head.ref] | @tsv')
+          IFS=$'\t' read -r HEAD_SHA HEAD_REPOSITORY_ID HEAD_BRANCH <<< "$PR_HEAD"
+          if [ -z "$HEAD_SHA" ] || [ -z "$HEAD_REPOSITORY_ID" ] || [ -z "$HEAD_BRANCH" ]; then
+            echo "::error::Failed to resolve HEAD repository, branch, and SHA for PR #${PR_NUMBER}"
             exit 1
           fi
           echo "PR #${PR_NUMBER} HEAD SHA: ${HEAD_SHA}"
@@ -78,16 +80,23 @@ jobs:
 
           # Note: only covers pull_request runs. Workflows using pull_request_target
           # are excluded; only retry workflows that test the PR itself.
-          # A cancelled workflow can leave failed or skipped dependent checks.
-          # Include those runs so a rerun can recover from cancelled prerequisites.
-          RUNS=$(gh api --paginate "repos/${GH_REPO}/actions/runs?head_sha=${HEAD_SHA}&event=pull_request&status=completed" \
-            --jq '.workflow_runs[]
-              | select(.conclusion == "failure" or .conclusion == "cancelled")
-              | [.id, .conclusion]
-              | @tsv')
+          # Select the newest logical run across all pages and statuses first.
+          # A successful or active replacement makes older failures ineligible.
+          # run_number stays fixed when an older run is retried; updated_at does not.
+          # shellcheck disable=SC2016 # Variables are jq arguments, not shell expansions.
+          RUN_FILTER='[.[].workflow_runs[]
+              | select(.head_repository.id == $head_repo and .head_branch == $head_branch)]
+            | group_by(.workflow_id)
+            | map(max_by(.run_number))
+            | .[]
+            | select(.status == "completed" and (.conclusion == "failure" or .conclusion == "cancelled"))
+            | [.id, .conclusion]
+            | @tsv'
+          RUNS=$(gh api --paginate --slurp "repos/${GH_REPO}/actions/runs?head_sha=${HEAD_SHA}&event=pull_request&per_page=100" \
+            | jq -r --argjson head_repo "$HEAD_REPOSITORY_ID" --arg head_branch "$HEAD_BRANCH" "$RUN_FILTER")
 
           if [ -z "$RUNS" ]; then
-            echo "No failed or cancelled workflow runs found for PR #${PR_NUMBER} (SHA: ${HEAD_SHA})"
+            echo "No eligible failed or cancelled workflow runs found for PR #${PR_NUMBER} (SHA: ${HEAD_SHA})"
             exit 0
           fi
 

@@ -25,6 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      # Check whether this failure was superseded before suggesting a retry.
+      actions: read
       pull-requests: write
     steps:
       # Never check out or execute PR code in this privileged workflow.
@@ -37,6 +39,17 @@ jobs:
             // by head branch and repository, then verify the current SHA.
             const headOwner = run.head_repository?.owner?.login;
             if (!headOwner) return;
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner, repo, workflow_id: run.workflow_id, head_sha: run.head_sha,
+              event: 'pull_request', per_page: 100,
+            });
+            const latest = runs
+              .filter(candidate => candidate.head_repository?.id === run.head_repository.id &&
+                candidate.head_branch === run.head_branch)
+              .reduce((newest, candidate) => !newest || candidate.run_number > newest.run_number
+                ? candidate : newest, null);
+            if (!latest || latest.id !== run.id || latest.run_attempt !== run.run_attempt ||
+                latest.status !== 'completed' || latest.conclusion !== 'failure') return;
             const pulls = await github.paginate(github.rest.pulls.list, {
               owner, repo, state: 'open', head: `${headOwner}:${run.head_branch}`,
               per_page: 100,

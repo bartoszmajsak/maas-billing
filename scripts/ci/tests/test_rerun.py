@@ -10,7 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW = ROOT / ".github/workflows/rerun.yml"
 # Stop before the first API call. No fake GitHub responses or scheduler.
-PARSER = textwrap.dedent(WORKFLOW.read_text().split("        run: |\n", 1)[1]).split("\nHEAD_SHA=", 1)[0]
+PARSER = textwrap.dedent(WORKFLOW.read_text().split("        run: |\n", 1)[1]).split("\nPR_HEAD=", 1)[0]
 
 
 class RerunParserTests(unittest.TestCase):

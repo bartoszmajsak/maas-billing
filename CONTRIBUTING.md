@@ -137,7 +137,9 @@ contributors can post one of these commands on its own line in a PR comment:
 | `/rerun-workflow MaaS Controller` | Retry all jobs in the named failed or cancelled workflow (quotes around the name are optional). |
 
 Only completed `pull_request` workflow runs for the PR's **current head commit**
-are eligible. Cancelled workflows are always retried in full, including with
+are eligible. Only the newest run of each workflow is considered, so a successful
+or active replacement leaves older failures alone. Cancelled workflows are always
+retried in full, including with
 `/rerun-failed`, to recover cancelled prerequisites. Successful and running
 workflows are left alone. The command workflow must be merged into the default
 branch before comments can trigger it.
@@ -147,7 +149,8 @@ retry `pull_request_target` workflows. Check the failure logs first: code, lint,
 manifest errors need a fix rather than repeated retries.
 
 On GitHub Actions failure, a bot posts or updates one comment per PR linking the
-failed run and these instructions. It ignores failures from older PR commits.
+failed run and these instructions. It ignores failures from older PR commits
+and superseded runs of the same workflow.
 
 **Run locally before pushing:**
 
