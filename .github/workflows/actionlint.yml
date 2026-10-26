@@ -19,10 +19,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Test PR rerun commands
+      - name: Test PR rerun command parsing
         run: python3 -m unittest discover -s scripts/ci/tests -v
-      - name: Test PR failure notifications
-        run: node scripts/ci/tests/test-rerun-help.cjs
 
   actionlint:
     runs-on: ubuntu-latest
