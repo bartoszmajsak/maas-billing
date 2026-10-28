@@ -115,6 +115,32 @@ func TestCheckModelHealthNoTokenBudget(t *testing.T) {
 	}
 }
 
+// TestCheckModelHealthDegradedKeepsValidModels covers a subscription that is Degraded
+// because one of its models has an unenforceable budget. Only that model is denied; the
+// others keep serving inference under their limits.
+func TestCheckModelHealthDegradedKeepsValidModels(t *testing.T) {
+	sub := &subscription{
+		Name:  "degraded-sub",
+		Phase: PhaseDegraded,
+		ModelRefs: []ModelRefInfo{
+			{Name: "good", Namespace: "ns", TokenRateLimits: []TokenRateLimit{{Limit: 1000, Window: "1m"}}},
+			{Name: "bad", Namespace: "ns", TokenRateLimits: []TokenRateLimit{{Limit: 1000, Window: "9999h"}}},
+		},
+		TokenRateLimitStatuses: []TokenRateLimitStatus{
+			{Model: "good", Ready: true, Reason: "Accepted"},
+			{Model: "bad", Ready: false, Reason: "InvalidSpec"},
+		},
+	}
+	if err := checkModelHealth(sub, "ns/good"); err != nil {
+		t.Errorf("checkModelHealth(ns/good) = %v, want nil", err)
+	}
+	err := checkModelHealth(sub, "ns/bad")
+	var unhealthy *ModelUnhealthyError
+	if !errors.As(err, &unhealthy) || unhealthy.Reason != "RateLimitNotEnforced" {
+		t.Errorf("checkModelHealth(ns/bad) = %v, want RateLimitNotEnforced", err)
+	}
+}
+
 // TestCheckModelHealthUnenforceableSpec covers an Active subscription whose model has a
 // token budget the controller cannot enforce, as seen while the Degraded status has not
 // been written: during a rolling upgrade, or when the API server rejects the write.
@@ -171,6 +197,8 @@ func TestValidTokenBudget(t *testing.T) {
 		{"limit past the maximum", ModelRefInfo{TokenRateLimits: []TokenRateLimit{{Limit: maxTokenRateLimit + 1, Window: "1m"}}}, false},
 		{"no budget", ModelRefInfo{}, false},
 		{"unlimited", ModelRefInfo{Unlimited: true}, true},
+		{"unlimited with an invalid limit", ModelRefInfo{Unlimited: true, TokenRateLimits: limits("9999h")}, false},
+		{"unlimited with a valid limit", ModelRefInfo{Unlimited: true, TokenRateLimits: limits("1m")}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

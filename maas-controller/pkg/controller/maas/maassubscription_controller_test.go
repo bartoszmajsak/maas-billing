@@ -2035,6 +2035,24 @@ func TestMaaSSubscriptionReconciler_DuplicateModelRefWindows(t *testing.T) {
 	}
 }
 
+// TestEnforcedModelRef_UnlimitedWithDeclaredLimits covers a reference that sets unlimited
+// and tokenRateLimits together. The declared limits win, so an invalid one makes the
+// reference unenforceable rather than unlimited; maas-api's validTokenBudget agrees.
+func TestEnforcedModelRef_UnlimitedWithDeclaredLimits(t *testing.T) {
+	ref := func(window string) []maasv1alpha1.ModelSubscriptionRef {
+		return []maasv1alpha1.ModelSubscriptionRef{{Name: "llm", Namespace: "ns", Unlimited: true,
+			TokenRateLimits: []maasv1alpha1.TokenRateLimit{{Limit: 1000, Window: window}}}}
+	}
+
+	if _, unlimited, err := enforcedModelRef(ref("9999h"), "ns", "llm"); err == nil || unlimited {
+		t.Errorf("enforcedModelRef(unlimited, 9999h) = unlimited %v, err %v, want an error", unlimited, err)
+	}
+	rates, unlimited, err := enforcedModelRef(ref("1m"), "ns", "llm")
+	if err != nil || unlimited || len(rates) != 1 {
+		t.Errorf("enforcedModelRef(unlimited, 1m) = rates %v, unlimited %v, err %v, want the 1m rate", rates, unlimited, err)
+	}
+}
+
 // sharedModelWithBadWindow returns a model shared by sub-valid (1m) and sub-bad (9999h),
 // with an accepted TRLP, and a client builder holding them.
 func sharedModelWithBadWindow(t *testing.T) *fake.ClientBuilder {
