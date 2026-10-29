@@ -528,12 +528,6 @@ def require_tenant_namespace_discovery():
         )
 
 
-def require_s27_blocked_story_enabled(story: str) -> None:
-    env_name = f"ENABLE_{story.upper()}_E2E"
-    if not env_bool(env_name):
-        pytest.skip(f"{story} E2E is present but gated until the backing story lands; set {env_name}=true")
-
-
 def require_aitenant_crd():
     result = _oc_run(["get", "crd", AITENANT_CRD])
     if result.returncode != 0:
@@ -1314,14 +1308,6 @@ def delete_namespace_best_effort(name: str) -> None:
     delete_best_effort("namespace", name, timeout="90s")
 
 
-def get_cr_annotation(kind: str, name: str, namespace: str, key: str) -> str:
-    obj = get_json_or_none(kind, name, namespace)
-    if not obj:
-        return ""
-    annotations = obj.get("metadata", {}).get("annotations") or {}
-    return annotations.get(key, "") or ""
-
-
 def parse_annotation_list(value: str) -> list[str]:
     return [item.strip() for item in (value or "").split(",") if item.strip()]
 
@@ -1579,12 +1565,6 @@ def assert_no_per_model_authpolicy(model_ref: str, model_namespace: str = MODEL_
     assert ap is None, f"legacy per-model AuthPolicy maas-auth-{model_ref} should not exist in gateway-only mode"
 
 
-def get_kuadrant_authpolicy_issuer(model_ref: str, model_namespace: str = MODEL_NAMESPACE) -> str:
-    """Deprecated alias: OIDC now lives on maas-gateway-auth, not per-model policies."""
-    _ = (model_ref, model_namespace)
-    return get_gateway_authpolicy_issuer()
-
-
 def auth_can_create_maassubscription(subject: str, namespace: str) -> bool:
     result = _oc_run(
         [
@@ -1635,15 +1615,6 @@ def tenant_api_base_url(slot: str) -> str:
         scheme = "http" if env_bool("INSECURE_HTTP") else "https"
         return f"{scheme}://{host}/maas-api"
     return ""
-
-
-def require_tenant_api_base_urls(*slots: str) -> dict[str, str]:
-    urls = {slot: tenant_api_base_url(slot) for slot in slots}
-    missing = [slot for slot, url in urls.items() if not url]
-    if missing:
-        needed = ", ".join(f"MAAS_API_BASE_URL_{slot.upper().replace('-', '_')}" for slot in missing)
-        pytest.fail(f"tenant maas-api URLs not configured; set {needed}")
-    return urls
 
 
 def bearer_headers(token: str) -> dict[str, str]:
