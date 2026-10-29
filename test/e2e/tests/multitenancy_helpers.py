@@ -1599,24 +1599,6 @@ def legacy_default_namespace() -> str:
     return _ns()
 
 
-def tenant_api_base_url(slot: str) -> str:
-    """Return a tenant maas-api base URL from explicit E2E env vars.
-
-    Accepted env names for slot "TENANT_A":
-    - MAAS_API_BASE_URL_TENANT_A
-    - GATEWAY_HOST_TENANT_A (converted to https://host/maas-api unless INSECURE_HTTP=true)
-    """
-    normalized = slot.upper().replace("-", "_")
-    explicit = os.environ.get(f"MAAS_API_BASE_URL_{normalized}")
-    if explicit:
-        return explicit.rstrip("/")
-    host = os.environ.get(f"GATEWAY_HOST_{normalized}")
-    if host:
-        scheme = "http" if env_bool("INSECURE_HTTP") else "https"
-        return f"{scheme}://{host}/maas-api"
-    return ""
-
-
 def bearer_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
