@@ -2475,63 +2475,63 @@ def _delete_governance_and_wait(*, subscriptions=(), auth_policies=(), timeout=6
 # Controller scaling utilities
 # ---------------------------------------------------------------------------
 
-def _scale_controller(replicas, namespace=None, timeout=60):
+def _scale_deployment(name, replicas, namespace, timeout=60):
     """
-    Scale the maas-controller deployment.
+    Scale a deployment and wait until its pods are up or gone.
 
-    Args:
-        replicas: Target replica count (0 to disable, 1+ to enable)
-        namespace: Deployment namespace (defaults to DEPLOYMENT_NAMESPACE env or 'opendatahub')
-        timeout: Max seconds to wait for scaling operation (default: 60)
+    Pods are matched by the deployment's own selector. A hand-written label such
+    as control-plane=controller-manager also matches other operators' pods in
+    the same namespace.
 
     Raises:
-        subprocess.CalledProcessError: If kubectl scale fails
-        TimeoutError: If pods don't reach desired state within timeout
+        subprocess.CalledProcessError: If scaling fails or the rollout is not
+            complete within timeout
+        TimeoutError: If pods are still present after timeout when scaling to 0
     """
-    namespace = namespace or os.environ.get("DEPLOYMENT_NAMESPACE", "opendatahub")
-
-    log.info(f"Scaling maas-controller to {replicas} replicas in namespace {namespace}...")
-
-    # Scale the deployment
+    log.info(f"Scaling {name} to {replicas} replicas in namespace {namespace}...")
     subprocess.run(
-        ["oc", "scale", "deployment", "maas-controller",
-         f"--replicas={replicas}", "-n", namespace],
+        ["oc", "scale", "deployment", name, f"--replicas={replicas}", "-n", namespace],
         check=True,
         capture_output=True,
         text=True,
-        timeout=timeout
+        timeout=timeout,
     )
 
-    # Wait for pods to reach desired state
-    if replicas == 0:
-        # Wait for all pods to terminate
-        log.debug(f"Waiting for maas-controller pods to terminate (timeout: {timeout}s)...")
+    if replicas > 0:
         subprocess.run(
-            ["oc", "wait", "--for=delete", "pod",
-             "-l", "app=maas-controller", "-n", namespace,
-             f"--timeout={timeout}s"],
-            check=False,  # Don't fail if no pods exist
+            ["oc", "rollout", "status", f"deployment/{name}", "-n", namespace, f"--timeout={timeout}s"],
+            check=True,
             capture_output=True,
-            text=True
+            text=True,
+            timeout=timeout + OC_TIMEOUT,
         )
-        log.info("✓ maas-controller scaled down to 0 replicas")
-    else:
-        # Wait for pods to become ready
-        log.debug(f"Waiting for maas-controller pods to become ready (timeout: {timeout}s)...")
-        try:
-            subprocess.run(
-                ["oc", "wait", "--for=condition=ready", "pod",
-                 "-l", "app=maas-controller", "-n", namespace,
-                 f"--timeout={timeout}s"],
-                check=True,
-                capture_output=True,
-                text=True
-            )
-            log.info(f"✓ maas-controller scaled to {replicas} replica(s)")
-        except subprocess.CalledProcessError as e:
-            # Log but don't fail - sometimes pods need extra time
-            log.warning(f"Pods may not be ready yet: {e.stderr}")
-            time.sleep(5)  # Give it a bit more time
+        log.info(f"✓ {name} scaled to {replicas} replica(s)")
+        return
+
+    result = _run_oc(["oc", "get", "deployment", name, "-n", namespace, "-o", "json"])
+    if result.returncode != 0:
+        raise subprocess.CalledProcessError(result.returncode, result.args, result.stdout, result.stderr)
+    match_labels = json.loads(result.stdout)["spec"]["selector"]["matchLabels"]
+    selector = ",".join(f"{key}={value}" for key, value in match_labels.items())
+
+    # Terminating pods drop out of .status.replicas but can still reconcile.
+    deadline = time.monotonic() + timeout
+    pods = []
+    while time.monotonic() < deadline:
+        result = _run_oc(["oc", "get", "pods", "-l", selector, "-n", namespace, "-o", "name"])
+        if result.returncode == 0:
+            pods = result.stdout.split()
+            if not pods:
+                log.info(f"✓ {name} scaled down to 0 replicas")
+                return
+        time.sleep(2)
+    raise TimeoutError(f"{name} pods still present after {timeout}s: {pods or result.stderr}")
+
+
+def _scale_controller(replicas, namespace=None, timeout=60):
+    """Scale the maas-controller deployment (namespace defaults to DEPLOYMENT_NAMESPACE or 'opendatahub')."""
+    namespace = namespace or os.environ.get("DEPLOYMENT_NAMESPACE", "opendatahub")
+    _scale_deployment("maas-controller", replicas, namespace, timeout)
 
 
 def _scale_controller_down(namespace=None, timeout=60):
@@ -2545,59 +2545,8 @@ def _scale_controller_up(namespace=None, timeout=60):
 
 
 def _scale_kuadrant_controller(replicas, namespace="kuadrant-system", timeout=60):
-    """
-    Scale the kuadrant-operator deployment.
-
-    Args:
-        replicas: Target replica count (0 to disable, 1+ to enable)
-        namespace: Deployment namespace (default: kuadrant-system)
-        timeout: Max seconds to wait for scaling operation (default: 60)
-
-    Raises:
-        subprocess.CalledProcessError: If kubectl scale fails
-        TimeoutError: If pods don't reach desired state within timeout
-    """
-    log.info(f"Scaling kuadrant-operator to {replicas} replicas in namespace {namespace}...")
-
-    # Scale the deployment
-    subprocess.run(
-        ["oc", "scale", "deployment", "kuadrant-operator-controller-manager",
-         f"--replicas={replicas}", "-n", namespace],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=timeout
-    )
-
-    # Wait for pods to reach desired state
-    if replicas == 0:
-        # Wait for all pods to terminate
-        log.debug(f"Waiting for kuadrant-operator pods to terminate (timeout: {timeout}s)...")
-        subprocess.run(
-            ["oc", "wait", "--for=delete", "pod",
-             "-l", "control-plane=controller-manager", "-n", namespace,
-             f"--timeout={timeout}s"],
-            check=False,  # Don't fail if no pods exist
-            capture_output=True,
-            text=True
-        )
-        log.info("✓ kuadrant-operator scaled down to 0 replicas")
-    else:
-        # Wait for pods to become ready
-        log.debug(f"Waiting for kuadrant-operator pods to become ready (timeout: {timeout}s)...")
-        try:
-            subprocess.run(
-                ["oc", "wait", "--for=condition=ready", "pod",
-                 "-l", "control-plane=controller-manager", "-n", namespace,
-                 f"--timeout={timeout}s"],
-                check=True,
-                capture_output=True,
-                text=True
-            )
-            log.info(f"✓ kuadrant-operator scaled to {replicas} replica(s)")
-        except subprocess.CalledProcessError:
-            log.warning(f"Pods may not be ready yet (timeout: {timeout}s)")
-            raise
+    """Scale the kuadrant-operator deployment."""
+    _scale_deployment("kuadrant-operator-controller-manager", replicas, namespace, timeout)
 
 
 def _scale_kuadrant_controller_down(namespace="kuadrant-system", timeout=60):
