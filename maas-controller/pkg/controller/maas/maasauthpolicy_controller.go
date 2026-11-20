@@ -1384,18 +1384,18 @@ allow {
 								"predicate": celModelIdentityAvailable,
 							},
 						},
+						// wasm-shim exposes each property as auth.identity.<name> to TRLP
+						// predicates and counters and to TelemetryPolicy labels, including
+						// policies MaaS does not render. Authorino fails the whole filter on
+						// the first property that errors.
 						"json": map[string]any{
 							"properties": map[string]any{
-								"groups":     map[string]any{"expression": celGroups},
+								// Read by the group label when captureGroup is on and by
+								// TelemetryPolicies MaaS does not manage. Kuadrant also keeps a
+								// removed label in the wasm config, so this stays unconditional.
 								"groups_str": map[string]any{"expression": fmt.Sprintf(`(%s).join(",")`, celGroups)},
 								"userid": map[string]any{
 									"expression": celUsername,
-								},
-								"keyId": map[string]any{
-									"expression": `(has(auth.metadata) && has(auth.metadata.apiKeyValidation)) ? auth.metadata.apiKeyValidation.keyId : ""`,
-								},
-								"keyName": map[string]any{
-									"expression": `(has(auth.metadata) && has(auth.metadata.apiKeyValidation)) ? auth.metadata.apiKeyValidation.keyName : ""`,
 								},
 								"selected_subscription": map[string]any{
 									"expression": `has(auth.metadata["subscription-info"].name) ? auth.metadata["subscription-info"].name : ""`,
@@ -1422,13 +1422,7 @@ allow {
 									"expression": `has(auth.metadata["subscription-info"].rateLimitId) ? auth.metadata["subscription-info"].rateLimitId : ""`,
 								},
 								"subscription_info": map[string]any{
-									"expression": `has(auth.metadata["subscription-info"].name) ? auth.metadata["subscription-info"] : {}`,
-								},
-								"subscription_error": map[string]any{
-									"expression": `has(auth.metadata["subscription-info"].error) ? auth.metadata["subscription-info"].error : ""`,
-								},
-								"subscription_error_message": map[string]any{
-									"expression": `has(auth.metadata["subscription-info"].message) ? auth.metadata["subscription-info"].message : ""`,
+									"expression": identitySubscriptionInfoExpr(),
 								},
 							},
 						},
@@ -1564,6 +1558,16 @@ allow {
 func subscriptionInfoFieldExpr(field string) string {
 	return fmt.Sprintf(`has(auth.metadata) && "subscription-info" in auth.metadata && `+
 		`has(auth.metadata["subscription-info"].%[1]s) ? auth.metadata["subscription-info"].%[1]s : ""`, field)
+}
+
+// identitySubscriptionInfoExpr exports only the subscription-info fields that
+// TelemetryPolicy labels read, as auth.identity.subscription_info. Both keys are
+// always present: maas-api omits empty values, and a label on a missing path
+// reads null or drops the request's Limitador descriptor, depending on the
+// wasm-shim build (kuadrant-operator#2242).
+func identitySubscriptionInfoExpr() string {
+	return `{"organizationId": (` + subscriptionInfoFieldExpr("organizationId") + `), ` +
+		`"costCenter": (` + subscriptionInfoFieldExpr("costCenter") + `)}`
 }
 
 func (r *MaaSAuthPolicyReconciler) gatewayAuthPolicyName(gatewayNamespace, gatewayName string) string {

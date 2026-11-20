@@ -16,7 +16,7 @@ Today’s pipeline does **not** drive TokenRateLimitPolicy by splitting group me
 
 2. **maas-api** resolves which **MaaSSubscription** applies (including validation, auto-selection when only one subscription applies, and error paths). Results are exposed to Authorino as **`subscription-info`** metadata. When a guardrail resolver is configured, a successful model selection also includes **`selectedGuardrailChecks`**, a sparse map whose keys are the shared SHA-256 check IDs and whose values are `true`. The map is `{}` when no guardrails apply; if a selected attachment cannot be resolved, the endpoint returns `guardrail_unavailable` and does not return a partial selection. The field carries selection state only; request headers are handled separately.
 
-3. **AuthPolicy `filters.identity`** copies resolved fields onto **`auth.identity`**, including:
+3. **AuthPolicy `filters.identity`** copies the fields that rate limits and telemetry read onto **`auth.identity`** (all of them are listed under [Identity metadata](#identity-metadata)), including:
    - **`selected_subscription_key`** — model-scoped key of the form  
      `{subscriptionNamespace}/{subscriptionName}@{modelNamespace}/{modelName}`  
      Kept for telemetry and debugging, and still the **rate-limit identity** for subscriptions that existed before the short-ID rollout.
@@ -38,44 +38,40 @@ So enforcement is: **subscription resolved in AuthPolicy → the same identity t
 
 ---
 
-## Identity metadata: groups, `groups_str`, and telemetry
+## Identity metadata
 
-Behavior is split between **`filters.identity`** (what gets serialized onto **`auth.identity`** for downstream consumers) and **`celGroups`** (what the controller uses for subscription selection and, for token identities, the `subscription-info` cache key). Both are defined in **`maasauthpolicy_controller.go`**.
+`filters.identity` in the gateway AuthPolicy (`maasauthpolicy_controller.go`) is the only source of **`auth.identity`** in wasm-shim, where TokenRateLimitPolicy predicates and counters and TelemetryPolicy labels read it. It carries only the fields one of those reads, each always present as a string. A label or predicate on a path the filter doesn't emit either reads `null` or drops the request's whole Limitador descriptor (kuadrant-operator#2242), depending on the wasm-shim build, so a policy you write yourself should read only these fields.
 
-### API key validation path
+| Field | Value | Read by |
+|---|---|---|
+| `userid` | API key: `apiKeyValidation.username`. OIDC: `preferred_username`, else `sub`. TokenReview: `user.username` | TRLP counters, `user` label |
+| `groups_str` | comma-joined groups, see below | `group` label (`captureGroup`) |
+| `selected_subscription` | selected subscription name, `""` when none | `subscription` label |
+| `selected_subscription_key` | `{subscriptionNamespace}/{subscriptionName}@{modelNamespace}/{modelName}`, `""` when none | TRLP for pre-upgrade subscriptions |
+| `selected_subscription_id` | `subscription-info.rateLimitId`, `""` for pre-upgrade subscriptions | TRLP for new subscriptions |
+| `subscription_info.organizationId`, `subscription_info.costCenter` | from the selected MaaSSubscription, `""` when unset | `organization_id` and `cost_center` labels |
 
-After Authorino runs API key validation, **`auth.metadata.apiKeyValidation`** is populated. In the generated AuthPolicy **success response** → **`filters.identity`** → **`json.properties`**, the controller sets:
+The filter runs only when the request names a model, in the path or through `X-Gateway-Model-Name`, the same condition as the `subscription-info` call.
 
-- **`groups`** → `auth.metadata.apiKeyValidation.groups`
-- **`groups_str`** → `auth.metadata.apiKeyValidation.groups.join(",")`
+### Groups
 
-So for **API keys**, `groups_str` is the comma-joined snapshot from validation metadata.
+`groups_str` uses the same **`celGroups`** expression as subscription selection and, for token identities, the `subscription-info` cache key:
 
-### Kubernetes `TokenReview` (OpenShift bearer token) path
+- API key: `auth.metadata.apiKeyValidation.groups`, the snapshot taken when the key was created.
+- Kubernetes TokenReview (OpenShift bearer token): `auth.identity.user.groups`, from TokenReview `status.user.groups`.
+- OIDC: the `groups` claim. When the token carries a valid `org_id`, each group is prefixed with `<org_id>/`.
 
-TokenReview returns groups on **`status.user.groups`**. Authorino surfaces that as **`auth.identity.user.groups`**.
-
-The controller **does not** define a separate `groups_str` expression that reads TokenReview groups. The **`filters.identity`** fields above still reference **`auth.metadata.apiKeyValidation.groups`** only; without API key metadata those expressions do **not** mirror TokenReview—treat **`groups_str`** (and the sibling **`groups`** property in that same JSON block) as **empty / irrelevant for pure bearer-token auth**.
-
-Subscription selection and caching use the **`celGroups`** CEL constant in the same file: **`auth.metadata.apiKeyValidation.groups`** when API key metadata exists; otherwise **`auth.identity.groups`** if present, else **`auth.identity.user.groups`**. For TokenReview, inspect **`auth.identity.user.groups`**, not `groups_str` from `filters.identity`.
-
-### OIDC path
-
-When a JWT carries a groups claim, Authorino may populate **`auth.identity.groups`**. **`celGroups`** uses that branch before falling back to **`auth.identity.user.groups`**.
-
-### TokenRateLimitPolicy (`maassubscription_controller.go`)
-
-TRLP **`when`** predicates match **`auth.identity.selected_subscription_id`** for subscriptions created after the short-ID rollout and **`auth.identity.selected_subscription_key`** for pre-upgrade subscriptions. Using **`groups_str`** for rate limits is **obsolete**.
+If any token group fails the group-name allowlist, the list is empty. For an OIDC token with an `org_id`, it is also empty when `org_id` isn't a canonical UUID or the token has more than 128 groups. TRLP predicates never match on groups. Rate limits use `selected_subscription_id` for subscriptions created after the short-ID rollout and `selected_subscription_key` for pre-upgrade ones.
 
 ### Troubleshooting: which field to inspect
 
 | Concern | API key flow | TokenReview (kube) token | OIDC |
 |--------|----------------|---------------------------|------|
-| Raw groups after auth | **`auth.metadata.apiKeyValidation.groups`** | **`auth.identity.user.groups`** (from TokenReview **`status.user.groups`**) | **`auth.identity.groups`** if present, else **`auth.identity.user.groups`** |
-| Serialized **`groups_str` in `filters.identity`** | From **`apiKeyValidation.groups.join(",")`** | Not populated from TokenReview (still tied to apiKeyValidation expression) | Same—only apiKeyValidation drives that JSON property |
-| Subscription selection + Authorino cache inputs | **`celGroups`**, **`celUsername`**, **`celSubscription`** + **`auth.metadata["subscription-info"]`** after select; the cache key is the key ID, username, bound subscription and model, without groups | Same **`celGroups`** branch → **`auth.identity.user.groups`** | **`celGroups`** → **`auth.identity.groups`** when set |
-| Rate limiting | **`auth.identity.selected_subscription_id`** (new CRs) or **`selected_subscription_key`** (pre-upgrade CRs) after successful select | Same | Same |
-| Telemetry / debug subscription@model | **`auth.identity.selected_subscription_key`** | Same | Same |
+| Raw groups after auth | `auth.metadata.apiKeyValidation.groups` | `auth.identity.user.groups` | `auth.identity.groups` |
+| Groups after normalization (`celGroups`, `groups_str`) | the raw groups | the raw groups, or none if one fails the allowlist | the raw groups, prefixed with `org_id/` when present, or none if one fails the allowlist |
+| Subscription selection and Authorino cache inputs | `celGroups`, `celUsername`, `celSubscription`, then `auth.metadata["subscription-info"]`. The cache key is the key ID, username, bound subscription and model, without groups | Same inputs. The cache key includes the groups | Same as TokenReview |
+| Rate limiting | `auth.identity.selected_subscription_id` (new CRs) or `selected_subscription_key` (pre-upgrade CRs) | Same | Same |
+| Telemetry / debug subscription@model | `auth.identity.selected_subscription_key` | Same | Same |
 
 If you read older notes about a “string trick” solely for TRLP group matching, treat that as **obsolete**.
 

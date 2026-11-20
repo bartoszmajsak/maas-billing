@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1947,8 +1948,8 @@ func TestMaaSAuthPolicyReconciler_CacheKeyModelIsolation(t *testing.T) {
 // TestMaaSAuthPolicyReconciler_IdentityHeadersUpstream verifies that identity headers
 // (X-MaaS-Username, X-MaaS-Group, X-MaaS-Subscription, X-MaaS-KeyName,
 // X-MaaS-Organization-Id, X-MaaS-Cost-Center, X-MaaS-Identity) are injected into
-// requests forwarded to upstream workloads for the consolidated gateway-level auth policy.
-// All identity information is also available to TRLP and telemetry via filters.identity.
+// requests forwarded to upstream workloads for the consolidated gateway-level auth policy,
+// and that filters.identity carries the fields TRLP and telemetry read.
 //
 // After the gateway-level refactor, response shaping lives in the singleton gateway policy
 // under spec.defaults.rules.response.
@@ -1995,7 +1996,6 @@ func TestMaaSAuthPolicyReconciler_IdentityHeadersUpstream(t *testing.T) {
 	}
 
 	successHeaders := []string{"spec", "defaults", "rules", "response", "success", "headers"}
-	identityProperties := []string{"spec", "defaults", "rules", "response", "success", "filters", "identity", "json", "properties"}
 
 	t.Run("identity headers forwarded to upstream", func(t *testing.T) {
 		headers := nestedMapRequired(t, gwPolicy, successHeaders...)
@@ -2069,27 +2069,30 @@ func TestMaaSAuthPolicyReconciler_IdentityHeadersUpstream(t *testing.T) {
 	})
 
 	t.Run("identity data available for TRLP and telemetry", func(t *testing.T) {
-		identity := nestedMapRequired(t, gwPolicy, identityProperties...)
-		for _, field := range []string{
-			"userid", "groups", "selected_subscription_key", "selected_subscription_id",
-			"selected_subscription", "subscription_info",
-		} {
-			if _, exists := identity[field]; !exists {
-				t.Errorf("filters.identity must include %q for TRLP/telemetry, but it's missing", field)
-			}
+		spec := nestedMapRequired(t, gwPolicy, "spec")
+		// resolvedModel differs from the path identity, so the key proves it is
+		// preferred for body-routed (BBR) requests.
+		got, err := evaluateIdentityFilter(t, spec, identityFilterRoots("Bearer sk-oai-test", map[string]any{
+			"apiKeyValidation": apiKeyValidationFixture("system:authenticated"),
+			"subscription-info": subscriptionInfoFixture(map[string]any{
+				"resolvedModel":  "default/llm",
+				"rateLimitId":    identityFilterRateLimitID,
+				"organizationId": "org-1",
+			}),
+		}))
+		if err != nil {
+			t.Fatalf("filters.identity failed: %v", err)
 		}
-		if _, exists := identity["keyId"]; !exists {
-			t.Error("filters.identity should include \"keyId\" for observability, but it's missing")
+		want := map[string]any{
+			"groups_str":                "system:authenticated",
+			"userid":                    "alice",
+			"selected_subscription":     "gold",
+			"selected_subscription_key": "models-as-a-service/gold@default/llm",
+			"selected_subscription_id":  identityFilterRateLimitID,
+			"subscription_info":         map[string]any{"organizationId": "org-1", "costCenter": ""},
 		}
-		for _, tc := range []struct{ field, want, why string }{
-			{"subscription_info", `auth.metadata["subscription-info"]`, "reference the full subscription-info object"},
-			{"selected_subscription_key", "resolvedModel", "prefer subscription-info.resolvedModel for BBR TRLP matching"},
-			{"selected_subscription_id", "rateLimitId", "read subscription-info.rateLimitId for TRLP matching"},
-		} {
-			expr := identityFieldExpression(t, identity, tc.field)
-			if !contains(expr, tc.want) {
-				t.Errorf("filters.identity[%q] = %s, want expression to %s", tc.field, expr, tc.why)
-			}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("filters.identity = %#v, want %#v", got, want)
 		}
 	})
 
@@ -2142,19 +2145,6 @@ func assertClearedResponseHeader(t *testing.T, headers map[string]any, header st
 	if value, found, _ := unstructured.NestedFieldNoCopy(cfg, "plain", "value"); !found || value != "" {
 		t.Errorf("header %q plain.value = %v (found %t), want empty string", header, value, found)
 	}
-}
-
-func identityFieldExpression(t *testing.T, identity map[string]any, field string) string {
-	t.Helper()
-	raw, ok := identity[field].(map[string]any)
-	if !ok {
-		t.Fatalf("filters.identity[%q] should be a map, got %T", field, identity[field])
-	}
-	expr, ok := raw["expression"].(string)
-	if !ok {
-		t.Fatalf("filters.identity[%q] expression missing", field)
-	}
-	return expr
 }
 
 func gatewayAuthPolicySpecTestObject(t *testing.T, oidc *oidcConfig) *unstructured.Unstructured {

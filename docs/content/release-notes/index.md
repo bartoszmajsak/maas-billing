@@ -8,6 +8,7 @@ This table maps each supported Red Hat OpenShift AI (RHOAI) release to the corre
 
 | RHOAI Version | MaaS Version | RHOAI Image Tag | Status | Notes |
 |---------------|--------------|-----------------|--------|-------|
+| 3.7           | TBD          | `v3.7`          | Planned | Fewer gateway `auth.identity` fields; see [Upgrade Guide](../migration/upgrade-to-3.7.md) |
 | 3.6           | TBD          | `v3.6`          | Planned | Short rate-limit IDs for **new** subscriptions; existing CRs keep `selected_subscription_key`; see [Upgrade Guide](../migration/upgrade-to-3.6.md) |
 | 3.5           | v0.2.1       | `v3.5`          | GA     | Multi-tenancy; body-based routing; xKS support; see [Upgrade Guide](../migration/upgrade-to-3.5.md) |
 | 3.4           | v0.1.1       | `v3.4`          | GA     | Subscription-based access; `Tenant` CR; see [Upgrade Guide](../migration/upgrade-to-3.4.md) |
@@ -20,6 +21,18 @@ This table maps each supported Red Hat OpenShift AI (RHOAI) release to the corre
 - **Downstream (RHOAI):** `registry.redhat.io/rhoai/odh-maas-api-rhel9:<tag>`, `registry.redhat.io/rhoai/odh-maas-controller-rhel9:<tag>`
 
 For dependency version requirements (OCP, Kuadrant/RHCL, Gateway API), see [Version Compatibility](../install/prerequisites.md#version-compatibility).
+
+---
+
+## Unreleased (RHOAI 3.7)
+
+**Release Date:** TBD
+
+### Upgrade notes
+
+See [Upgrade to 3.7](../migration/upgrade-to-3.7.md) for full guidance. Summary:
+
+- **Fewer `auth.identity` fields at the gateway:** the gateway AuthPolicy no longer exports `groups`, `keyId`, `keyName`, `subscription_error` and `subscription_error_message`, and `auth.identity.subscription_info` carries only `organizationId` and `costCenter`, empty when unset. No MaaS-managed policy reads the removed fields, and Limitador counters keep their keys. A TelemetryPolicy label or TokenRateLimitPolicy you wrote yourself that reads a removed field stops resolving; check before upgrading. See [Upgrade to 3.7](../migration/upgrade-to-3.7.md#gateway-identity-fields).
 
 ---
 
