@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1375,59 +1376,7 @@ allow {
 					"X-MaaS-Identity":        verifiedIdentityHeader(oidc, celIsNotAPIKey),
 				},
 				"filters": map[string]any{
-					"identity": map[string]any{
-						// Same guard as subscription-info. Without it the filter fails on
-						// /maas-api requests, and Authorino cancels the other priority-0
-						// response configs, dropping X-MaaS-* headers at random.
-						"when": []any{
-							map[string]any{
-								"predicate": celModelIdentityAvailable,
-							},
-						},
-						// wasm-shim exposes each property as auth.identity.<name> to TRLP
-						// predicates and counters and to TelemetryPolicy labels, including
-						// policies MaaS does not render. Authorino fails the whole filter on
-						// the first property that errors.
-						"json": map[string]any{
-							"properties": map[string]any{
-								// Read by the group label when captureGroup is on and by
-								// TelemetryPolicies MaaS does not manage. Kuadrant also keeps a
-								// removed label in the wasm config, so this stays unconditional.
-								"groups_str": map[string]any{"expression": fmt.Sprintf(`(%s).join(",")`, celGroups)},
-								"userid": map[string]any{
-									"expression": celUsername,
-								},
-								"selected_subscription": map[string]any{
-									"expression": `has(auth.metadata["subscription-info"].name) ? auth.metadata["subscription-info"].name : ""`,
-								},
-								// Model-scoped subscription key: namespace/name@modelIdentity
-								// Prefer resolvedModel from subscription-info (MaaSModelRef
-								// namespace/name after BBR alias resolution). Always set for
-								// telemetry/debugging. Legacy (pre-upgrade) TRLP limits also
-								// match this field when maas-api omits rateLimitId.
-								"selected_subscription_key": map[string]any{
-									"expression": fmt.Sprintf(
-										`(has(auth.metadata["subscription-info"].namespace) && `+
-											`has(auth.metadata["subscription-info"].name)) `+
-											`? auth.metadata["subscription-info"].namespace + "/" `+
-											`+ auth.metadata["subscription-info"].name + "@" + %s : ""`,
-										celResolvedModelIdentity,
-									),
-								},
-								// Short hash from maas-api (subscription-info.rateLimitId) for
-								// new subscriptions. Empty when rateLimitId is omitted (legacy
-								// identity). New TRLP limits match this field; legacy limits
-								// match selected_subscription_key instead.
-								"selected_subscription_id": map[string]any{
-									"expression": `has(auth.metadata["subscription-info"].rateLimitId) ? auth.metadata["subscription-info"].rateLimitId : ""`,
-								},
-								"subscription_info": map[string]any{
-									"expression": identitySubscriptionInfoExpr(),
-								},
-							},
-						},
-						"metrics": true, "priority": int64(0),
-					},
+					"identity": identityFilter(),
 				},
 			},
 			"unauthenticated": map[string]any{
@@ -1558,6 +1507,55 @@ allow {
 func subscriptionInfoFieldExpr(field string) string {
 	return fmt.Sprintf(`has(auth.metadata) && "subscription-info" in auth.metadata && `+
 		`has(auth.metadata["subscription-info"].%[1]s) ? auth.metadata["subscription-info"].%[1]s : ""`, field)
+}
+
+// identityFilter returns filters.identity for the gateway AuthPolicy. wasm-shim
+// exposes its output as auth.identity to TRLP predicates and counters and to
+// TelemetryPolicy labels. Keep only fields with a known reader: dropping one
+// breaks the TRLPs and TelemetryPolicies that read it, including ones MaaS does
+// not render. The fields form one CEL map literal because Authorino
+// re-parses the authorization JSON for every expression it evaluates. A json
+// filter with one expression per field fails as a whole on the first error too,
+// so the single expression gives up no isolation.
+func identityFilter() map[string]any {
+	fields := []struct{ name, expression string }{
+		// Read by the group label when captureGroup is on and by TelemetryPolicies
+		// MaaS does not manage. Kuadrant also keeps a removed label in the wasm
+		// config, so this stays unconditional.
+		{"groups_str", `(` + celGroups + `).join(",")`},
+		{"userid", celUsername},
+		{"selected_subscription", `has(auth.metadata["subscription-info"].name) ? auth.metadata["subscription-info"].name : ""`},
+		// namespace/name@model. Prefers resolvedModel from subscription-info
+		// (MaaSModelRef namespace/name after BBR alias resolution). Legacy
+		// (pre-upgrade) TRLP limits match this field when maas-api omits rateLimitId.
+		{"selected_subscription_key", `(has(auth.metadata["subscription-info"].namespace) && ` +
+			`has(auth.metadata["subscription-info"].name)) ` +
+			`? auth.metadata["subscription-info"].namespace + "/" ` +
+			`+ auth.metadata["subscription-info"].name + "@" + ` + celResolvedModelIdentity + ` : ""`},
+		// Short hash from subscription-info.rateLimitId, empty for legacy
+		// subscriptions. New TRLP limits match this field.
+		{"selected_subscription_id", `has(auth.metadata["subscription-info"].rateLimitId) ? auth.metadata["subscription-info"].rateLimitId : ""`},
+		{"subscription_info", identitySubscriptionInfoExpr()},
+	}
+	entries := make([]string, 0, len(fields))
+	for _, field := range fields {
+		entries = append(entries, strconv.Quote(field.name)+": ("+field.expression+")")
+	}
+	return map[string]any{
+		// Same guard as subscription-info. Without it the filter fails on
+		// /maas-api requests, and Authorino cancels the other priority-0
+		// response configs, dropping X-MaaS-* headers at random.
+		"when": []any{
+			map[string]any{
+				"predicate": celModelIdentityAvailable,
+			},
+		},
+		"plain": map[string]any{
+			"expression": "{" + strings.Join(entries, ", ") + "}",
+		},
+		"metrics":  true,
+		"priority": int64(0),
+	}
 }
 
 // identitySubscriptionInfoExpr exports only the subscription-info fields that

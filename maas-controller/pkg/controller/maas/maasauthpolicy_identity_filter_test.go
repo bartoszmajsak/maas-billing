@@ -9,6 +9,7 @@ package maas
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -26,6 +27,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	gatewayapiv1 "sigs.k8s.io/gateway-api/apis/v1"
+	"sigs.k8s.io/yaml"
 
 	maasv1alpha1 "github.com/opendatahub-io/models-as-a-service/maas-controller/api/maas/v1alpha1"
 	"github.com/opendatahub-io/models-as-a-service/maas-controller/pkg/platform/tenantreconcile"
@@ -40,7 +44,8 @@ const (
 // authorinoCELEnv mirrors the environment Authorino compiles response
 // expressions in (authorino pkg/expressions/cel Compile): every root binding is a
 // google.protobuf.Struct. cel.OptionalTypes is left out because Authorino v0.22
-// does not enable it, so an expression that compiles here compiles there.
+// does not enable it, and the strings library is pinned to version 3, the latest
+// in Authorino's cel-go v0.21.
 func authorinoCELEnv(t *testing.T) *cel.Env {
 	t.Helper()
 	structType := cel.ObjectType("google.protobuf.Struct")
@@ -50,7 +55,7 @@ func authorinoCELEnv(t *testing.T) *cel.Env {
 		cel.Variable("source", structType),
 		cel.Variable("destination", structType),
 		cel.Variable("auth", structType),
-		ext.Strings(),
+		ext.Strings(ext.StringsVersion(3)),
 	)
 	if err != nil {
 		t.Fatalf("NewEnv: %v", err)
@@ -129,47 +134,25 @@ func nestedSpecMap(t *testing.T, obj map[string]any, fields ...string) map[strin
 }
 
 // evaluateIdentityFilter evaluates the gateway AuthPolicy's filters.identity the
-// way Authorino's response evaluators do: a plain expression once, or each json
-// property in turn, failing the whole filter on the first error
-// (authorino pkg/evaluators/response/dynamic_json.go).
+// way Authorino's plain response evaluator does. It requires the single plain
+// expression, so a revert to per-property json fails here.
 func evaluateIdentityFilter(t *testing.T, spec map[string]any, roots map[string]any) (map[string]any, error) {
 	t.Helper()
 	filter := nestedSpecMap(t, spec, "defaults", "rules", "response", "success", "filters", "identity")
-	env := authorinoCELEnv(t)
-	input := authorinoInput(t, roots)
-
-	if _, isPlain := filter["plain"]; isPlain {
-		expr, ok := nestedSpecMap(t, filter, "plain")["expression"].(string)
-		if !ok {
-			t.Fatal("filters.identity.plain.expression missing")
-		}
-		value, err := evaluateAuthorinoExpression(t, env, expr, input)
-		if err != nil {
-			return nil, err
-		}
-		out, ok := value.(map[string]any)
-		if !ok {
-			t.Fatalf("filters.identity = %#v, want a map", value)
-		}
-		return out, nil
+	if _, isJSON := filter["json"]; isJSON {
+		t.Fatal("filters.identity has json properties, want one plain expression")
 	}
-
-	properties := nestedSpecMap(t, filter, "json", "properties")
-	out := make(map[string]any, len(properties))
-	for name, raw := range properties {
-		property, ok := raw.(map[string]any)
-		if !ok {
-			t.Fatalf("filters.identity property %q = %T, want map", name, raw)
-		}
-		expr, ok := property["expression"].(string)
-		if !ok {
-			t.Fatalf("filters.identity property %q has no expression", name)
-		}
-		value, err := evaluateAuthorinoExpression(t, env, expr, input)
-		if err != nil {
-			return nil, fmt.Errorf("property %s: %w", name, err)
-		}
-		out[name] = value
+	expr, ok := nestedSpecMap(t, filter, "plain")["expression"].(string)
+	if !ok {
+		t.Fatal("filters.identity.plain.expression missing")
+	}
+	value, err := evaluateAuthorinoExpression(t, authorinoCELEnv(t), expr, authorinoInput(t, roots))
+	if err != nil {
+		return nil, err
+	}
+	out, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("filters.identity = %#v, want a map", value)
 	}
 	return out, nil
 }
@@ -186,13 +169,17 @@ func identityFilterTestSpec() map[string]any {
 }
 
 func identityFilterRoots(identity any, metadata map[string]any) map[string]any {
+	return identityFilterRootsFor(identity, metadata, identityFilterModelPath, nil)
+}
+
+func identityFilterRootsFor(identity any, metadata map[string]any, path string, headers map[string]any) map[string]any {
+	allHeaders := map[string]any{"content-type": "application/json"}
+	for k, v := range headers {
+		allHeaders[k] = v
+	}
 	return map[string]any{
-		"auth": map[string]any{"identity": identity, "metadata": metadata},
-		"request": map[string]any{
-			"path":    identityFilterModelPath,
-			"method":  "POST",
-			"headers": map[string]any{"content-type": "application/json"},
-		},
+		"auth":    map[string]any{"identity": identity, "metadata": metadata},
+		"request": map[string]any{"path": path, "method": "POST", "headers": allHeaders},
 	}
 }
 
@@ -227,6 +214,10 @@ func subscriptionInfoFixture(fields map[string]any) map[string]any {
 }
 
 func tokenReviewIdentity(groups []string) map[string]any {
+	return tokenReviewIdentityAs("system:serviceaccount:team:bot", groups)
+}
+
+func tokenReviewIdentityAs(username string, groups []string) map[string]any {
 	asAny := make([]any, len(groups))
 	for i, g := range groups {
 		asAny[i] = g
@@ -234,7 +225,7 @@ func tokenReviewIdentity(groups []string) map[string]any {
 	return map[string]any{
 		"authenticated": true,
 		"user": map[string]any{
-			"username": "system:serviceaccount:team:bot",
+			"username": username,
 			"groups":   asAny,
 		},
 	}
@@ -258,6 +249,10 @@ func TestGatewayIdentityFilterOutput(t *testing.T) {
 		"headers":        map[string]any{"x-tenant": []any{"a"}},
 	})
 	legacy := subscriptionInfoFixture(nil)
+	// maas-api omits resolvedModel when empty; the key then falls back to the
+	// path or X-Gateway-Model-Name identity, which legacy TRLP limits match on.
+	unresolved := subscriptionInfoFixture(nil)
+	delete(unresolved, "resolvedModel")
 	denied := map[string]any{
 		"error":         "not_found",
 		"message":       "no matching subscription",
@@ -275,6 +270,8 @@ func TestGatewayIdentityFilterOutput(t *testing.T) {
 		name     string
 		identity any
 		metadata map[string]any
+		path     string
+		headers  map[string]any
 		want     map[string]any
 	}{
 		{
@@ -300,6 +297,75 @@ func TestGatewayIdentityFilterOutput(t *testing.T) {
 				"apiKeyValidation":  apiKeyValidationFixture("system:authenticated"),
 				"subscription-info": legacy,
 			},
+			want: map[string]any{
+				"groups_str":                "system:authenticated",
+				"userid":                    "alice",
+				"selected_subscription":     "gold",
+				"selected_subscription_key": goldKey,
+				"selected_subscription_id":  "",
+				"subscription_info":         emptyInfo,
+			},
+		},
+		{
+			name:     "api key, path-routed, no resolvedModel",
+			identity: "Bearer sk-oai-test",
+			metadata: map[string]any{
+				"apiKeyValidation":  apiKeyValidationFixture("system:authenticated"),
+				"subscription-info": unresolved,
+			},
+			want: map[string]any{
+				"groups_str":                "system:authenticated",
+				"userid":                    "alice",
+				"selected_subscription":     "gold",
+				"selected_subscription_key": goldKey,
+				"selected_subscription_id":  "",
+				"subscription_info":         emptyInfo,
+			},
+		},
+		{
+			name:     "api key, body-routed, no resolvedModel",
+			identity: "Bearer sk-oai-test",
+			metadata: map[string]any{
+				"apiKeyValidation":  apiKeyValidationFixture("system:authenticated"),
+				"subscription-info": unresolved,
+			},
+			path:    "/v1/chat/completions",
+			headers: map[string]any{"x-gateway-model-name": "llm/model-b"},
+			want: map[string]any{
+				"groups_str":                "system:authenticated",
+				"userid":                    "alice",
+				"selected_subscription":     "gold",
+				"selected_subscription_key": "models-as-a-service/gold@llm/model-b",
+				"selected_subscription_id":  "",
+				"subscription_info":         emptyInfo,
+			},
+		},
+		{
+			name:     "api key, body-routed, resolvedModel wins over the header",
+			identity: "Bearer sk-oai-test",
+			metadata: map[string]any{
+				"apiKeyValidation":  apiKeyValidationFixture("system:authenticated"),
+				"subscription-info": legacy,
+			},
+			path:    "/v1/chat/completions",
+			headers: map[string]any{"x-gateway-model-name": "publishers/llm/models/served-a"},
+			want: map[string]any{
+				"groups_str":                "system:authenticated",
+				"userid":                    "alice",
+				"selected_subscription":     "gold",
+				"selected_subscription_key": goldKey,
+				"selected_subscription_id":  "",
+				"subscription_info":         emptyInfo,
+			},
+		},
+		{
+			name:     "api key, path-routed with a header, no resolvedModel: the path wins",
+			identity: "Bearer sk-oai-test",
+			metadata: map[string]any{
+				"apiKeyValidation":  apiKeyValidationFixture("system:authenticated"),
+				"subscription-info": unresolved,
+			},
+			headers: map[string]any{"x-gateway-model-name": "llm/model-b"},
 			want: map[string]any{
 				"groups_str":                "system:authenticated",
 				"userid":                    "alice",
@@ -339,6 +405,48 @@ func TestGatewayIdentityFilterOutput(t *testing.T) {
 			},
 		},
 		{
+			// Counters and labels are case-sensitive, so values must pass through as-is.
+			name:     "token review, mixed-case username and groups",
+			identity: tokenReviewIdentityAs("system:serviceaccount:Team:Bot", []string{"system:authenticated", "Team-A"}),
+			metadata: map[string]any{"subscription-info": legacy},
+			want: map[string]any{
+				"groups_str":                "system:authenticated,Team-A",
+				"userid":                    "system:serviceaccount:Team:Bot",
+				"selected_subscription":     "gold",
+				"selected_subscription_key": goldKey,
+				"selected_subscription_id":  "",
+				"subscription_info":         emptyInfo,
+			},
+		},
+		{
+			name:     "token review, no groups",
+			identity: tokenReviewIdentity(nil),
+			metadata: map[string]any{"subscription-info": legacy},
+			want: map[string]any{
+				"groups_str":                "",
+				"userid":                    "system:serviceaccount:team:bot",
+				"selected_subscription":     "gold",
+				"selected_subscription_key": goldKey,
+				"selected_subscription_id":  "",
+				"subscription_info":         emptyInfo,
+			},
+		},
+		{
+			// One group failing the allowlist empties the list, as in subscription selection.
+			name:     "token review, unsafe group",
+			identity: tokenReviewIdentity([]string{"system:authenticated", "bad;group"}),
+			metadata: map[string]any{"subscription-info": legacy},
+			want: map[string]any{
+				"groups_str":                "",
+				"userid":                    "system:serviceaccount:team:bot",
+				"selected_subscription":     "gold",
+				"selected_subscription_key": goldKey,
+				"selected_subscription_id":  "",
+				"subscription_info":         emptyInfo,
+			},
+		},
+		{
+			// A long list, to check the join keeps every group and their order.
 			name:     "token review, 40 groups",
 			identity: tokenReviewIdentity(tokenGroups40),
 			metadata: map[string]any{"subscription-info": legacy},
@@ -371,6 +479,24 @@ func TestGatewayIdentityFilterOutput(t *testing.T) {
 			},
 		},
 		{
+			name: "legacy oidc, unsafe group",
+			identity: map[string]any{
+				"iss":                "https://issuer.example.com/realms/test",
+				"sub":                "subject-3",
+				"preferred_username": "carol",
+				"groups":             []any{"team-b", "bad;group"},
+			},
+			metadata: map[string]any{"subscription-info": legacy},
+			want: map[string]any{
+				"groups_str":                "",
+				"userid":                    "carol",
+				"selected_subscription":     "gold",
+				"selected_subscription_key": goldKey,
+				"selected_subscription_id":  "",
+				"subscription_info":         emptyInfo,
+			},
+		},
+		{
 			name: "legacy oidc without preferred_username",
 			identity: map[string]any{
 				"iss":    "https://issuer.example.com/realms/test",
@@ -392,7 +518,11 @@ func TestGatewayIdentityFilterOutput(t *testing.T) {
 	spec := identityFilterTestSpec()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := evaluateIdentityFilter(t, spec, identityFilterRoots(tc.identity, tc.metadata))
+			path := tc.path
+			if path == "" {
+				path = identityFilterModelPath
+			}
+			got, err := evaluateIdentityFilter(t, spec, identityFilterRootsFor(tc.identity, tc.metadata, path, tc.headers))
 			if err != nil {
 				t.Fatalf("filters.identity failed: %v", err)
 			}
@@ -405,13 +535,112 @@ func TestGatewayIdentityFilterOutput(t *testing.T) {
 	}
 }
 
+// TestGatewayIdentityFilterAttributes pins the filter's evaluator settings: the
+// same when as subscription-info, metrics on, and priority 0 with the headers.
+func TestGatewayIdentityFilterAttributes(t *testing.T) {
+	filter := nestedSpecMap(t, identityFilterTestSpec(), "defaults", "rules", "response", "success", "filters", "identity")
+	want := map[string]any{
+		"when":     []any{map[string]any{"predicate": celModelIdentityAvailable}},
+		"metrics":  true,
+		"priority": int64(0),
+	}
+	for key, value := range want {
+		if !reflect.DeepEqual(filter[key], value) {
+			t.Errorf("filters.identity.%s = %#v, want %#v", key, filter[key], value)
+		}
+	}
+}
+
+// bracketFieldPattern turns ["field"] into .field so auth.identity["x"] is
+// collected like auth.identity.x. Keys with hyphens, such as
+// auth.metadata["subscription-info"], don't match and stay as they are.
+var bracketFieldPattern = regexp.MustCompile(`\["([A-Za-z_][A-Za-z0-9_]*)"\]`)
+
 var identityPathPattern = regexp.MustCompile(`auth\.identity\.([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)`)
 
 func collectIdentityPaths(text string, into map[string][]string, source string) {
-	for _, m := range identityPathPattern.FindAllStringSubmatch(text, -1) {
-		if !slices.Contains(into[m[1]], source) {
-			into[m[1]] = append(into[m[1]], source)
+	text = bracketFieldPattern.ReplaceAllString(text, ".$1")
+	for _, m := range identityPathPattern.FindAllStringSubmatchIndex(text, -1) {
+		path := text[m[2]:m[3]]
+		if m[1] < len(text) && text[m[1]] == '(' {
+			// auth.identity.x.size(): the last segment is a method, not a field.
+			path = path[:max(strings.LastIndex(path, "."), 0)]
 		}
+		if path != "" && !slices.Contains(into[path], source) {
+			into[path] = append(into[path], source)
+		}
+	}
+}
+
+// wasmShimPolicyKinds are the Kuadrant policies evaluated in wasm-shim, where
+// auth.identity is the filter output. Other YAML (AuthPolicy, AuthConfig) reads
+// auth.identity inside Authorino, where it is the authenticated identity.
+var wasmShimPolicyKinds = map[string]bool{"TelemetryPolicy": true, "RateLimitPolicy": true, "TokenRateLimitPolicy": true}
+
+// collectPolicyObjectPaths collects auth.identity paths from the string values of
+// a wasm-shim policy, or of each item of a List. Reading values rather than the
+// raw YAML skips comments.
+func collectPolicyObjectPaths(obj map[string]any, into map[string][]string, file string) {
+	kind, _ := obj["kind"].(string)
+	if kind == "List" {
+		items, _ := obj["items"].([]any)
+		for _, item := range items {
+			if m, ok := item.(map[string]any); ok {
+				collectPolicyObjectPaths(m, into, file)
+			}
+		}
+		return
+	}
+	if !wasmShimPolicyKinds[kind] {
+		return
+	}
+	var walk func(any)
+	walk = func(v any) {
+		switch x := v.(type) {
+		case string:
+			collectIdentityPaths(x, into, kind+" "+file)
+		case map[string]any:
+			for _, child := range x {
+				walk(child)
+			}
+		case []any:
+			for _, child := range x {
+				walk(child)
+			}
+		}
+	}
+	walk(obj)
+}
+
+// collectDeploymentPolicyPaths collects auth.identity paths from every
+// TelemetryPolicy, RateLimitPolicy and TokenRateLimitPolicy under deployment/.
+func collectDeploymentPolicyPaths(t *testing.T, into map[string][]string) {
+	t.Helper()
+	dir := filepath.Join("..", "..", "..", "..", "deployment")
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatalf("open %s: %v", dir, err)
+	}
+	defer root.Close()
+	fsys := root.FS()
+	err = fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || (filepath.Ext(path) != ".yaml" && filepath.Ext(path) != ".yml") {
+			return err
+		}
+		data, err := fs.ReadFile(fsys, path)
+		if err != nil {
+			return err
+		}
+		for doc := range strings.SplitSeq(string(data), "\n---") {
+			var obj map[string]any
+			if yaml.Unmarshal([]byte(doc), &obj) == nil {
+				collectPolicyObjectPaths(obj, into, path)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", dir, err)
 	}
 }
 
@@ -464,16 +693,7 @@ func identityConsumerPaths(t *testing.T) map[string][]string {
 		}
 	}
 
-	for _, file := range []string{
-		filepath.Join("..", "..", "..", "..", "deployment", "base", "observability", "gateway-telemetry-policy.yaml"),
-		filepath.Join("..", "..", "..", "..", "deployment", "base", "maas-controller", "policies", "gateway-default-deny.yaml"),
-	} {
-		data, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
-		collectIdentityPaths(string(data), paths, filepath.Base(file))
-	}
+	collectDeploymentPolicyPaths(t, paths)
 
 	for _, legacy := range []bool{false, true} {
 		si := subInfo{subNamespace: "models-as-a-service", subName: "gold", modelScoped: "models-as-a-service/gold@llm/model-a", legacy: legacy}
@@ -554,5 +774,110 @@ func TestGatewayIdentityFilterServesEveryConsumer(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// assertAuthPolicyCELCompiles compiles every predicate and expression in spec
+// in Authorino's environment, and checks that predicates are boolean. Authorino
+// rejects an AuthConfig whose CEL does not compile, which the regex checks in
+// maasauthpolicy_cel_rhcl_test.go don't catch.
+func assertAuthPolicyCELCompiles(t *testing.T, spec map[string]any) {
+	t.Helper()
+	env := authorinoCELEnv(t)
+	for _, occ := range collectAuthPolicyCEL("spec", spec) {
+		if strings.HasSuffix(occ.Path, ".selector") {
+			continue // gjson path, not CEL
+		}
+		ast, issues := env.Compile(occ.Expr)
+		if issues.Err() != nil {
+			t.Errorf("CEL at %s does not compile in Authorino's environment: %v\n%s", occ.Path, issues.Err(), occ.Expr)
+			continue
+		}
+		if strings.HasSuffix(occ.Path, ".predicate") {
+			if out := ast.OutputType(); !out.IsExactType(cel.BoolType) && !out.IsExactType(cel.DynType) {
+				t.Errorf("predicate at %s has type %s, Authorino needs bool: %s", occ.Path, out, occ.Expr)
+			}
+		}
+	}
+}
+
+// TestGatewayIdentityFilterUpgradeFromJSON checks the upgrade from the json
+// filter: removed properties exist only on the cluster, and specMatchesDesired
+// ignores current-only keys, so only the shape change can trigger the update.
+// After one update the next reconcile must be a no-op.
+func TestGatewayIdentityFilterUpgradeFromJSON(t *testing.T) {
+	const (
+		tenantNamespace = "ai-tenant-redteam"
+		tenantID        = "redteam"
+		gatewayNS       = "tenant-gateway-ns"
+		gatewayName     = "tenant-gateway"
+	)
+	gateway := &gatewayapiv1.Gateway{ObjectMeta: metav1.ObjectMeta{Name: gatewayName, Namespace: gatewayNS}}
+	kubeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRESTMapper(testRESTMapper()).
+		WithObjects(gateway).
+		Build()
+	reconciler := &MaaSAuthPolicyReconciler{
+		Client:           kubeClient,
+		Scheme:           scheme,
+		GatewayNamespace: "default-gateway-ns",
+		GatewayName:      "default-gateway",
+	}
+	reconcile := func() bool {
+		t.Helper()
+		changed, err := reconciler.reconcileGatewayAuthPolicyWithHeaders(
+			t.Context(), logr.Discard(), nil, false, tenantNamespace, tenantID, gatewayNS, gatewayName, nil,
+		)
+		if err != nil {
+			t.Fatalf("reconcileGatewayAuthPolicyWithHeaders: %v", err)
+		}
+		return changed
+	}
+	policyName := reconciler.gatewayAuthPolicyName(gatewayNS, gatewayName)
+	identityPath := []string{"spec", "defaults", "rules", "response", "success", "filters", "identity"}
+
+	reconcile()
+
+	// given the json filter a previous release wrote
+	policy := gatewayAuthPolicy(t, kubeClient, gatewayNS, policyName)
+	legacyFilter := map[string]any{
+		"when": []any{map[string]any{"predicate": celModelIdentityAvailable}},
+		"json": map[string]any{"properties": map[string]any{
+			"groups":            map[string]any{"expression": celGroups},
+			"userid":            map[string]any{"expression": celUsername},
+			"keyId":             map[string]any{"expression": `""`},
+			"subscription_info": map[string]any{"expression": `has(auth.metadata["subscription-info"].name) ? auth.metadata["subscription-info"] : {}`},
+		}},
+		"metrics":  true,
+		"priority": int64(0),
+	}
+	if err := unstructured.SetNestedField(policy.Object, legacyFilter, identityPath...); err != nil {
+		t.Fatalf("set legacy filter: %v", err)
+	}
+	if err := kubeClient.Update(t.Context(), policy); err != nil {
+		t.Fatalf("store legacy filter: %v", err)
+	}
+
+	// when the controller reconciles
+	if !reconcile() {
+		t.Fatal("reconcile left the json filter in place")
+	}
+
+	// then the filter is the plain expression, and nothing else changes after
+	policy = gatewayAuthPolicy(t, kubeClient, gatewayNS, policyName)
+	filter := nestedMapRequired(t, policy, identityPath...)
+	if _, found := filter["json"]; found {
+		t.Errorf("filters.identity still has json properties: %#v", filter["json"])
+	}
+	if _, found := filter["plain"]; !found {
+		t.Errorf("filters.identity = %#v, want a plain expression", filter)
+	}
+	updatedRV := policy.GetResourceVersion()
+	if reconcile() {
+		t.Error("second reconcile updated the AuthPolicy again")
+	}
+	if rv := gatewayAuthPolicy(t, kubeClient, gatewayNS, policyName).GetResourceVersion(); rv != updatedRV {
+		t.Errorf("ResourceVersion changed from %s to %s on a no-op reconcile", updatedRV, rv)
 	}
 }

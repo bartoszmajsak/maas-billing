@@ -185,6 +185,7 @@ func TestGatewayAuthPolicySpec_AllCEL_RHCLCompatible(t *testing.T) {
 				tc.oidc, tc.xAPIKeyEnabled, tc.tenantID, tc.tenantName, tc.gatewayNS, tc.gatewayName, nil,
 			)
 			assertAllAuthPolicyCEL_RHCLCompatible(t, spec)
+			assertAuthPolicyCELCompiles(t, spec)
 		})
 	}
 }

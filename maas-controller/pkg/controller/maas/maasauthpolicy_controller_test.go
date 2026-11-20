@@ -2070,8 +2070,8 @@ func TestMaaSAuthPolicyReconciler_IdentityHeadersUpstream(t *testing.T) {
 
 	t.Run("identity data available for TRLP and telemetry", func(t *testing.T) {
 		spec := nestedMapRequired(t, gwPolicy, "spec")
-		// resolvedModel differs from the path identity, so the key proves it is
-		// preferred for body-routed (BBR) requests.
+		// resolvedModel differs from the path identity, so the key proves
+		// resolvedModel is preferred over the path.
 		got, err := evaluateIdentityFilter(t, spec, identityFilterRoots("Bearer sk-oai-test", map[string]any{
 			"apiKeyValidation": apiKeyValidationFixture("system:authenticated"),
 			"subscription-info": subscriptionInfoFixture(map[string]any{
