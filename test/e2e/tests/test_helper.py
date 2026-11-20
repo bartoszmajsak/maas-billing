@@ -2885,3 +2885,40 @@ def _create_maas_model_ref(name: str, namespace: str, llmis_name: str, *, tenant
         },
         "spec": spec,
     })
+
+
+_LIMITADOR_LABEL_RE = re.compile(r'([a-zA-Z_][a-zA-Z0-9_]*)="((?:\\.|[^"])*)"')
+
+
+def _limitador_authorized_hits_series():
+    """Label sets of every authorized_hits series Limitador exports.
+
+    Returns (series, None), or (None, reason) when no Limitador or its metrics
+    endpoint can be reached, so callers can skip on clusters without them.
+    """
+    result = subprocess.run(
+        ["oc", "get", "limitador", "-A", "-o", "json"],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    if result.returncode != 0:
+        return None, f"Limitador CR not readable: {result.stderr.strip()}"
+    limitadors = json.loads(result.stdout).get("items") or []
+    if not limitadors:
+        return None, "no Limitador CR is installed"
+
+    series = []
+    for limitador in limitadors:
+        metadata = limitador["metadata"]
+        metrics = subprocess.run(
+            ["oc", "get", "--raw",
+             f"/api/v1/namespaces/{metadata['namespace']}/services/limitador-{metadata['name']}:8080/proxy/metrics"],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        if metrics.returncode != 0:
+            return None, f"Limitador metrics not reachable: {metrics.stderr.strip()}"
+        for line in metrics.stdout.splitlines():
+            if line.startswith(("authorized_hits{", "authorized_hits_total{")):
+                # Label values may contain spaces (group names), so cut at the
+                # closing brace rather than the first space.
+                series.append(dict(_LIMITADOR_LABEL_RE.findall(line[: line.rindex("}") + 1])))
+    return series, None
