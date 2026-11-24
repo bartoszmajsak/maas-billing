@@ -96,7 +96,7 @@ kubectl logs -n <monitoring-namespace> \
 
 ### Cleanup
 
-How you remove resources depends on how they were applied. `./scripts/observability/install-observability.sh` applies TelemetryPolicy and Istio Telemetry from `deployment/base/observability/`, plus these resources when their conditions match:
+How you remove resources depends on how they were applied. `./scripts/observability/install-observability.sh` applies these resources when their conditions match. It doesn't apply the TelemetryPolicy or Istio Telemetry: maas-controller owns them.
 
 | Resource | When |
 |----------|------|
@@ -111,7 +111,7 @@ How you remove resources depends on how they were applied. `./scripts/observabil
 |-----------------|-------------|-----------|---------|
 | **Operator** (recommended) | Metrics Usage dashboard via `usageMetricsDashboard` on `Config`. Usage-log dashboards are always reconciled while `Config/default` exists (`usageLogging` does not gate them). | Controller `ownerReference` on `Config` (`configs.maas.opendatahub.io/default`); field manager `maas-controller`. | Metrics Usage: set `usageMetricsDashboard=false`. Usage-log dashboards are recreated while the controller runs. See [Operator-managed dashboards](#operator-managed-dashboards) below. |
 | **Kustomize** (development) | `kustomize build` of `deployment/components/observability/observability/dashboards/` (and optionally `usage-logs/dsci-managed/`). | Label `app.kubernetes.io/managed-by: maas-observability` on the metrics Usage dashboard. No `Config` controller reference. | Delete `dashboard-3-maas-usage-admin` by name. For usage-logs, `kubectl delete -k` only sticks when the operator is not also reconciling those objects. |
-| **`install-observability.sh`** | TelemetryPolicy, Istio Telemetry, and the conditional monitors/rules in the table above. | `app.kubernetes.io/managed-by: maas-observability` on the kustomize base and gateway Service/ServiceMonitor. Limitador monitor and PrometheusRules do not all carry that label. | Delete the applied objects by name (see [Telemetry and ServiceMonitors](#telemetry-and-servicemonitors)). Dashboards are unaffected. |
+| **`install-observability.sh`** | The conditional monitors/rules in the table above. | `app.kubernetes.io/managed-by: maas-observability` on the gateway Service/ServiceMonitor. Limitador monitor and PrometheusRules do not all carry that label. | Delete the applied objects by name (see [Telemetry and ServiceMonitors](#telemetry-and-servicemonitors)). Dashboards are unaffected. |
 
 Identify operator-owned dashboards:
 
@@ -167,10 +167,6 @@ The controller applies `deployment/components/observability/usage-logs/dsci-mana
 Kustomize/development cleanup only. Do not run this in operator-managed mode. For operator-managed telemetry, update the tenant configuration and let the Tenant reconciler manage those resources.
 
 ```bash
-# Always applied by the script (from deployment/base/observability/)
-kubectl delete telemetrypolicy -n openshift-ingress maas-telemetry
-kubectl delete telemetry -n openshift-ingress latency-per-subscription
-
 # Conditional: Limitador ServiceMonitor (only if the script deployed it)
 kubectl delete servicemonitor -n kuadrant-system limitador-metrics --ignore-not-found
 

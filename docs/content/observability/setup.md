@@ -138,17 +138,16 @@ kubectl patch maastenantconfig default-tenant -n models-as-a-service --type=merg
 !!! warning "Development Only"
     Production deployments should use operator-managed telemetry (Option 1).
 
+The TelemetryPolicy and Istio Telemetry always come from maas-controller (Option 1). The script doesn't apply them, because a second copy would overwrite the controller's objects.
+
 ```bash
-# Deploy base telemetry + conditional ServiceMonitors (does not apply Perses dashboards)
+# Conditional ServiceMonitors and PrometheusRules (does not apply Perses dashboards)
 ./scripts/observability/install-observability.sh
 ```
 
 **Manual deployment:**
 
 ```bash
-# Base telemetry (requires Gateway + AuthPolicy)
-kustomize build deployment/base/observability | kubectl apply -f -
-
 # Conditional ServiceMonitors (auto-detects Kuadrant monitors)
 ./scripts/observability/install-observability.sh
 
@@ -160,7 +159,6 @@ kustomize build deployment/components/observability/observability/dashboards | k
 
 | Path | Contents |
 |------|----------|
-| `deployment/base/observability/` | TelemetryPolicy, Istio Telemetry, metadata-evaluator PrometheusRule |
 | `deployment/components/observability/prometheus/` | Standalone Prometheus (dev/test) |
 | `deployment/components/observability/observability/dashboards/` | Perses usage dashboard (metrics) |
 | `deployment/components/observability/usage-logs/dsci-managed/` | Perses usage-log dashboards and tenancy proxy |
@@ -170,8 +168,8 @@ kustomize build deployment/components/observability/observability/dashboards | k
 
 | Resource | Kustomize | Operator |
 |----------|-----------|----------|
-| TelemetryPolicy | `base/observability/` | Yes (Tenant reconciler) |
-| Istio Telemetry | `base/observability/` | Yes (Tenant reconciler) |
+| TelemetryPolicy | Not applied | Yes (Tenant reconciler) |
+| Istio Telemetry | Not applied | Yes (Tenant reconciler) |
 | Limitador ServiceMonitor | Conditional | Kuadrant PodMonitor when `observability.enable: true` |
 | Authorino /server-metrics | `authorino-server-metrics-servicemonitor.yaml` | No (Kuadrant only scrapes `/metrics`) |
 | Perses usage dashboards | `deployment/components/observability/observability/dashboards/` (`managed-by: maas-observability`) | Yes (`ensureUsageDashboard` when `usageMetricsDashboard: true`; `Config` controller owner). Not applied by `install-observability.sh`. |

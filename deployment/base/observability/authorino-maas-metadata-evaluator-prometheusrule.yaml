@@ -3,7 +3,7 @@
 # Scraped metrics come from Authorino /server-metrics (see authorino-server-metrics-servicemonitor.yaml).
 # Requires metadata rules apiKeyValidation + subscription-info with metrics enabled (MaaS controller).
 #
-# Deployed by: scripts/observability/install-observability.sh → kustomize build deployment/base/observability
+# Deployed by: scripts/observability/install-observability.sh, with the Authorino namespace substituted
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:

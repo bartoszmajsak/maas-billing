@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # MaaS Observability Stack Installation Script
-# Configures metrics collection (ServiceMonitors, TelemetryPolicy).
+# Configures metrics collection (ServiceMonitors, PrometheusRules).
+# TelemetryPolicy and Istio Telemetry come from maas-controller (MaasTenantConfig spec.telemetry).
 #
 # This script is idempotent - safe to run multiple times
 #
@@ -13,7 +14,7 @@
 set -euo pipefail
 
 # Preflight checks
-for cmd in kubectl kustomize yq; do
+for cmd in kubectl yq; do
     if ! command -v "$cmd" &>/dev/null; then
         echo "❌ Required command '$cmd' not found. Please install it first."
         exit 1
@@ -24,7 +25,7 @@ show_help() {
     echo "Usage: $0"
     echo ""
     echo "Installs monitoring components:"
-    echo "  - Deploys TelemetryPolicy and ServiceMonitors"
+    echo "  - Deploys ServiceMonitors and PrometheusRules"
     echo "  - Configures Istio Gateway metrics"
     echo ""
 
@@ -58,15 +59,12 @@ echo "📊 MaaS Observability Stack Installation"
 echo "========================================="
 echo ""
 
-echo "1️⃣ Deploying TelemetryPolicy and ServiceMonitors..."
+echo "1️⃣ Deploying ServiceMonitors..."
 
-# Deploy base observability resources (TelemetryPolicy + Istio Telemetry)
-# TelemetryPolicy is CRITICAL - it extracts user/subscription/model labels for Limitador metrics
+# TelemetryPolicy and Istio Telemetry are not applied here: maas-controller owns them, and
+# applying a copy over the controller's TelemetryPolicy breaks inference until it restores it.
 BASE_OBSERVABILITY_DIR="$PROJECT_ROOT/deployment/base/observability"
 if [ -d "$BASE_OBSERVABILITY_DIR" ]; then
-    kustomize build "$BASE_OBSERVABILITY_DIR" | kubectl apply -f -
-    echo "   ✅ TelemetryPolicy and Istio Telemetry deployed"
-
     # Deploy Authorino server-metrics ServiceMonitor.
     # The Kuadrant operator's authorino-operator-monitor only scrapes /metrics (controller-runtime).
     # This additional ServiceMonitor scrapes /server-metrics for auth evaluation metrics
@@ -80,7 +78,7 @@ if [ -d "$BASE_OBSERVABILITY_DIR" ]; then
         echo "   ✅ Authorino /server-metrics ServiceMonitor deployed"
     fi
 else
-    echo "   ⚠️  Base observability directory not found - TelemetryPolicy may be missing!"
+    echo "   ⚠️  Base observability directory not found - skipping Authorino server-metrics"
 fi
 
 echo ""
