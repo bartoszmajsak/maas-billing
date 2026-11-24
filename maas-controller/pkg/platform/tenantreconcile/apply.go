@@ -2,8 +2,11 @@ package tenantreconcile
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -76,13 +79,77 @@ func ApplyRendered(ctx context.Context, c client.Client, scheme *runtime.Scheme,
 		unstructured.RemoveNestedField(u.Object, "metadata", "managedFields")
 		unstructured.RemoveNestedField(u.Object, "metadata", "resourceVersion")
 		unstructured.RemoveNestedField(u.Object, "status")
+		// Read before the apply: Apply writes the live object back into u.
+		telemetryLabels, isTelemetryPolicy := renderedTelemetryLabels(u)
 		// ForceOwnership is intentional: maas-controller is the sole manager for
 		// Tenant platform resources, ensuring a clean field-manager handoff.
 		if err := c.Apply(ctx, client.ApplyConfigurationFromUnstructured(u), client.FieldOwner(ssaFieldOwner), client.ForceOwnership); err != nil {
 			return fmt.Errorf("apply %s %s/%s: %w", u.GetKind(), u.GetNamespace(), u.GetName(), err)
 		}
+		if isTelemetryPolicy {
+			pruneUnrenderedTelemetryLabels(ctx, c, u, telemetryLabels)
+		}
 	}
 	return nil
+}
+
+// telemetryLabelsPath is where a TelemetryPolicy keeps its metric labels.
+var telemetryLabelsPath = []string{"spec", "metrics", "default", "labels"}
+
+// renderedTelemetryLabels returns a copy of the metric labels of a rendered TelemetryPolicy.
+// It returns false for any other kind and for a policy that renders no labels, which would
+// otherwise read as every live label being stray.
+func renderedTelemetryLabels(u *unstructured.Unstructured) (map[string]any, bool) {
+	if u.GroupVersionKind().GroupKind() != GVKTelemetryPolicy.GroupKind() {
+		return nil, false
+	}
+	labels, found, err := unstructured.NestedMap(u.Object, telemetryLabelsPath...)
+	return labels, found && err == nil && len(labels) > 0
+}
+
+// pruneUnrenderedTelemetryLabels removes TelemetryPolicy metric labels the controller doesn't
+// render. Server-side apply only removes fields its own field manager set, so a label added
+// by another writer survives every apply. The static policy that install-observability.sh
+// used to apply over the default tenant's left an unguarded user label behind that way.
+// It runs after the apply, so the rendered labels are already present and the map can't be
+// left empty. A failure is logged and retried on the next reconcile rather than blocking the
+// remaining operands.
+func pruneUnrenderedTelemetryLabels(ctx context.Context, c client.Client, policy *unstructured.Unstructured, renderedLabels map[string]any) {
+	log := oteljson.FromContext(ctx)
+	live := &unstructured.Unstructured{}
+	live.SetGroupVersionKind(policy.GroupVersionKind())
+	if err := c.Get(ctx, client.ObjectKeyFromObject(policy), live); err != nil {
+		log.V(1).Info("Skipping TelemetryPolicy label prune: cannot read the live policy",
+			"namespace", policy.GetNamespace(), "name", policy.GetName(), "error", err.Error())
+		return
+	}
+	liveLabels, _, _ := unstructured.NestedMap(live.Object, telemetryLabelsPath...)
+
+	removed := make(map[string]any)
+	for key := range liveLabels {
+		if _, ok := renderedLabels[key]; !ok {
+			removed[key] = nil
+		}
+	}
+	if len(removed) == 0 {
+		return
+	}
+	keys := slices.Sorted(maps.Keys(removed))
+
+	patch, err := json.Marshal(map[string]any{
+		"spec": map[string]any{"metrics": map[string]any{"default": map[string]any{"labels": removed}}},
+	})
+	if err != nil {
+		log.Error(err, "Cannot build the TelemetryPolicy label prune patch", "labels", keys)
+		return
+	}
+	if err := c.Patch(ctx, live, client.RawPatch(types.MergePatchType, patch)); err != nil {
+		log.Error(err, "Cannot remove TelemetryPolicy labels the controller doesn't render",
+			"namespace", live.GetNamespace(), "name", live.GetName(), "labels", keys)
+		return
+	}
+	log.Info("Removed TelemetryPolicy labels the controller doesn't render",
+		"namespace", live.GetNamespace(), "name", live.GetName(), "labels", keys)
 }
 
 // configOwnerRefSkip matches rendered objects that must not get Config as controller owner

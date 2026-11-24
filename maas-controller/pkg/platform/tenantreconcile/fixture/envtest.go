@@ -3,6 +3,8 @@
 package fixture
 
 import (
+	"path/filepath"
+
 	"github.com/onsi/ginkgo/v2"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 
@@ -10,10 +12,12 @@ import (
 	pkgtest "github.com/opendatahub-io/models-as-a-service/maas-controller/pkg/testing"
 )
 
-// SetupTestEnv starts envtest with the core and MaaS types registered.
+// SetupTestEnv starts envtest with the core and MaaS types registered and the third-party
+// CRDs under tenantreconcile's testdata/crds installed.
 func SetupTestEnv() *pkgtest.Client {
 	ginkgo.By("Setting up the test environment")
 	return pkgtest.Configure(
 		pkgtest.WithScheme(clientgoscheme.AddToScheme, maasv1alpha1.AddToScheme),
+		pkgtest.WithCRDs(filepath.Join(pkgtest.ProjectRoot(), "maas-controller", "pkg", "platform", "tenantreconcile", "testdata", "crds")),
 	).Start()
 }
