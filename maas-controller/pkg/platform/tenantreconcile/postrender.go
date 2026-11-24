@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -452,6 +453,21 @@ func appendIPPWorkloadHPA(log logr.Logger, resources *[]unstructured.Unstructure
 	return nil
 }
 
+// identityLabel returns a TelemetryPolicy label expression for a field under auth.identity
+// that is "" when any step of the path is missing. Kuadrant hands each auth.* label to two
+// evaluators. In the wasm-shim, auth.identity is the gateway AuthPolicy's identity filter, and
+// a label that doesn't resolve fails the request with a 500. In Authorino, auth.identity
+// doesn't exist yet at the metric call sites before the identity phase and is the raw
+// credential string for API keys, and every miss is logged. Guarding every step resolves
+// in both.
+func identityLabel(path ...string) string {
+	guards := []string{"has(auth.identity)"}
+	for i := range path {
+		guards = append(guards, "has(auth.identity."+strings.Join(path[:i+1], ".")+")")
+	}
+	return strings.Join(guards, " && ") + " ? auth.identity." + strings.Join(path, ".") + ` : ""`
+}
+
 func buildTelemetryLabels(
 	log logr.Logger,
 	config *maasv1alpha1.TenantTelemetryConfig,
@@ -479,18 +495,18 @@ func buildTelemetryLabels(
 	labels := map[string]any{
 		"tenant_name":      fmt.Sprintf("%q", tenantTrackingName(tenant)),
 		"tenant_namespace": fmt.Sprintf("%q", tenant.GetNamespace()),
-		"subscription":     "auth.identity.selected_subscription",
-		"cost_center":      `has(auth.identity.subscription_info.costCenter) ? auth.identity.subscription_info.costCenter : ""`,
+		"subscription":     identityLabel("selected_subscription"),
+		"cost_center":      identityLabel("subscription_info", "costCenter"),
 	}
 	if captureOrganization {
-		labels["organization_id"] = `has(auth.identity.subscription_info.organizationId) ? auth.identity.subscription_info.organizationId : ""`
+		labels["organization_id"] = identityLabel("subscription_info", "organizationId")
 	}
 	if captureUser {
 		log.Info("WARNING: User identity metrics enabled - ensure GDPR/privacy compliance", "field", "captureUser", "value", true)
-		labels["user"] = "auth.identity.userid"
+		labels["user"] = identityLabel("userid")
 	}
 	if captureGroup {
-		labels["group"] = "auth.identity.groups_str"
+		labels["group"] = identityLabel("groups_str")
 	}
 	if captureModelUsage {
 		labels["model"] = "responseBodyJSON(\"/model\")"

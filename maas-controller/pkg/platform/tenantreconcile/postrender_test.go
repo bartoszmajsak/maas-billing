@@ -39,9 +39,9 @@ func TestBuildTelemetryLabels(t *testing.T) {
 			expectedLabels: map[string]any{
 				"tenant_name":      `"models-as-a-service"`,
 				"tenant_namespace": `"models-as-a-service"`,
-				"subscription":     "auth.identity.selected_subscription",
-				"cost_center":      `has(auth.identity.subscription_info.costCenter) ? auth.identity.subscription_info.costCenter : ""`,
-				"organization_id":  `has(auth.identity.subscription_info.organizationId) ? auth.identity.subscription_info.organizationId : ""`,
+				"subscription":     `has(auth.identity) && has(auth.identity.selected_subscription) ? auth.identity.selected_subscription : ""`,
+				"cost_center":      `has(auth.identity) && has(auth.identity.subscription_info) && has(auth.identity.subscription_info.costCenter) ? auth.identity.subscription_info.costCenter : ""`,
+				"organization_id":  `has(auth.identity) && has(auth.identity.subscription_info) && has(auth.identity.subscription_info.organizationId) ? auth.identity.subscription_info.organizationId : ""`,
 				"model":            "responseBodyJSON(\"/model\")",
 			},
 			absentKeys: []string{"user", "group", "subscription_namespace"},
@@ -54,7 +54,7 @@ func TestBuildTelemetryLabels(t *testing.T) {
 				},
 			},
 			expectedLabels: map[string]any{
-				"group": "auth.identity.groups_str",
+				"group": `has(auth.identity) && has(auth.identity.groups_str) ? auth.identity.groups_str : ""`,
 			},
 		},
 		{
@@ -74,7 +74,7 @@ func TestBuildTelemetryLabels(t *testing.T) {
 				},
 			},
 			expectedLabels: map[string]any{
-				"user": "auth.identity.userid",
+				"user": `has(auth.identity) && has(auth.identity.userid) ? auth.identity.userid : ""`,
 			},
 		},
 		{
@@ -108,11 +108,11 @@ func TestBuildTelemetryLabels(t *testing.T) {
 			expectedLabels: map[string]any{
 				"tenant_name":      `"models-as-a-service"`,
 				"tenant_namespace": `"models-as-a-service"`,
-				"subscription":     "auth.identity.selected_subscription",
-				"cost_center":      `has(auth.identity.subscription_info.costCenter) ? auth.identity.subscription_info.costCenter : ""`,
-				"organization_id":  `has(auth.identity.subscription_info.organizationId) ? auth.identity.subscription_info.organizationId : ""`,
-				"user":             "auth.identity.userid",
-				"group":            "auth.identity.groups_str",
+				"subscription":     `has(auth.identity) && has(auth.identity.selected_subscription) ? auth.identity.selected_subscription : ""`,
+				"cost_center":      `has(auth.identity) && has(auth.identity.subscription_info) && has(auth.identity.subscription_info.costCenter) ? auth.identity.subscription_info.costCenter : ""`,
+				"organization_id":  `has(auth.identity) && has(auth.identity.subscription_info) && has(auth.identity.subscription_info.organizationId) ? auth.identity.subscription_info.organizationId : ""`,
+				"user":             `has(auth.identity) && has(auth.identity.userid) ? auth.identity.userid : ""`,
+				"group":            `has(auth.identity) && has(auth.identity.groups_str) ? auth.identity.groups_str : ""`,
 				"model":            "responseBodyJSON(\"/model\")",
 			},
 		},
@@ -159,7 +159,7 @@ func TestConfigureTelemetryPolicyResourcesIncludesProducerScope(t *testing.T) {
 	require.True(t, found)
 	assert.Equal(t, `"redteam"`, labels["tenant_name"])
 	assert.Equal(t, `"ai-tenant-redteam"`, labels["tenant_namespace"])
-	assert.Equal(t, "auth.identity.selected_subscription", labels["subscription"])
+	assert.Equal(t, `has(auth.identity) && has(auth.identity.selected_subscription) ? auth.identity.selected_subscription : ""`, labels["subscription"])
 	assert.NotContains(t, labels, "subscription_namespace")
 	assert.Contains(t, labels, "organization_id")
 }
