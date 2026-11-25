@@ -46,6 +46,7 @@ Environment variables (all optional unless noted):
   - E2E_GATEWAY_PROPAGATION_DELAY: Delay between gateway retries in seconds (default: 5)
   - E2E_GATEWAY_ENFORCED_TIMEOUT: Wait for AuthPolicy Accepted+Enforced (default: 180)
   - E2E_GATEWAY_ENFORCED_MISSING_GRACE: Fail early if AuthPolicy CR absent this long (default: 30)
+  - E2E_AUTH_CACHE_TIMEOUT: Wait for access changes on a credential Authorino has cached (default: 90)
 """
 
 import base64
@@ -87,6 +88,9 @@ GATEWAY_ENFORCED_TIMEOUT = int(os.environ.get("E2E_GATEWAY_ENFORCED_TIMEOUT", "1
 # If the AuthPolicy CR is missing this long, fail fast (misconfigured name/namespace)
 # instead of burning the full GATEWAY_ENFORCED_TIMEOUT.
 GATEWAY_ENFORCED_MISSING_GRACE = int(os.environ.get("E2E_GATEWAY_ENFORCED_MISSING_GRACE", "30"))
+# Authorino caches maas-api lookups for --metadata-cache-ttl (60s by default),
+# so access changes can lag for a credential that already passed.
+AUTH_CACHE_TIMEOUT = int(os.environ.get("E2E_AUTH_CACHE_TIMEOUT", "90"))
 
 
 def _derive_infra_namespace(controller_namespace: str) -> str:

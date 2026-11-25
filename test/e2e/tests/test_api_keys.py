@@ -41,6 +41,7 @@ import requests
 
 from conftest import TLS_VERIFY
 from test_helper import (
+    AUTH_CACHE_TIMEOUT,
     MODEL_NAME,
     MODEL_NAMESPACE,
     MODEL_REF,
@@ -97,6 +98,28 @@ def model_completions_url(model_v1: str) -> str:
 def inference_model_name() -> str:
     """Model name for inference requests. Override with INFERENCE_MODEL_NAME env var."""
     return os.environ.get("INFERENCE_MODEL_NAME", MODEL_NAME)
+
+
+def _poll_until_rejected(completions_url: str, key: str, model: str, max_wait: int) -> requests.Response:
+    """Poll completions until rejection or timeout and return the last response.
+
+    A revoked key keeps passing until Authorino's cached validation expires, and each
+    request that passes spends the token budget this user shares with later tests, so
+    requests are sparse and ask for one token.
+    """
+    deadline = time.monotonic() + max_wait
+    while True:
+        remaining = deadline - time.monotonic()
+        response = requests.post(
+            completions_url,
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json={"model": model, "prompt": "Test", "max_tokens": 1},
+            timeout=max(min(remaining, 10), 1),
+            verify=TLS_VERIFY,
+        )
+        if response.status_code == 403 or remaining <= 0:
+            return response
+        time.sleep(5)
 
 
 class TestAPIKeyCRUD:
@@ -619,19 +642,13 @@ class TestAPIKeyModelInference:
         assert r_revoke.status_code == 200, f"Failed to revoke: {r_revoke.text}"
         assert r_revoke.json().get("status") == "revoked"
 
-        # Wait for revocation to propagate
-        time.sleep(2)
-
-        # Try to use revoked key
-        r_revoked = requests.post(
-            model_completions_url,
-            headers=key_headers,
-            json={"model": inference_model_name, "prompt": "Test", "max_tokens": 5},
-            timeout=30,
-            verify=TLS_VERIFY,
+        # The request above cached the key's validation, so the gateway can keep
+        # accepting the revoked key until the metadata cache TTL expires.
+        r_revoked = _poll_until_rejected(model_completions_url, key, inference_model_name, AUTH_CACHE_TIMEOUT)
+        assert r_revoked.status_code == 403, (
+            f"Expected 403 for revoked key within {AUTH_CACHE_TIMEOUT}s, "
+            f"got {r_revoked.status_code}: {r_revoked.text}"
         )
-
-        assert r_revoked.status_code == 403, f"Expected 403 for revoked key, got {r_revoked.status_code}: {r_revoked.text}"
         print("[inference] Revoked key correctly rejected with 403")
 
     def test_api_key_chat_completions(
@@ -834,27 +851,13 @@ class TestAPIKeyRevocationE2E:
             r = requests.delete(f"{api_keys_base_url}/{k['id']}", headers=headers, timeout=30, verify=TLS_VERIFY)
             assert r.status_code == 200, f"Failed to revoke key {k['id']}: {r.text}"
 
-        # Poll until all revoked keys are rejected at the gateway
-        max_wait = 30
-        poll_interval = 0.5
+        # Poll until all revoked keys are rejected. keys[0] was already used, so
+        # its cached validation can survive until the metadata TTL expires.
         for i, k in enumerate(keys):
-            deadline = time.monotonic() + max_wait
-            while True:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    break
-                r_inf = requests.post(
-                    model_completions_url,
-                    headers={"Authorization": f"Bearer {k['key']}", "Content-Type": "application/json"},
-                    json={"model": inference_model_name, "prompt": "Test", "max_tokens": 5},
-                    timeout=min(remaining, 10),
-                    verify=TLS_VERIFY,
-                )
-                if r_inf.status_code == 403:
-                    break
-                time.sleep(poll_interval)
+            r_inf = _poll_until_rejected(model_completions_url, k["key"], inference_model_name, AUTH_CACHE_TIMEOUT)
             assert r_inf.status_code == 403, (
-                f"Key {i} should be rejected within {max_wait}s after revoke, got {r_inf.status_code}: {r_inf.text}"
+                f"Key {i} should be rejected within {AUTH_CACHE_TIMEOUT}s after revoke, "
+                f"got {r_inf.status_code}: {r_inf.text}"
             )
         print("[revoke] All 3 keys correctly rejected at gateway after individual revocation")
 

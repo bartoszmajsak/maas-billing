@@ -53,6 +53,7 @@ import pytest
 import requests
 
 from test_helper import (
+    AUTH_CACHE_TIMEOUT,
     MODEL_NAME,
     MODEL_NAMESPACE,
     MODEL_PATH,
@@ -70,6 +71,7 @@ from test_helper import (
     UNCONFIGURED_MODEL_REF,
     _apply_cr,
     _create_api_key,
+    _create_api_key_raw,
     _create_sa_token,
     _create_test_auth_policy,
     _create_test_subscription,
@@ -410,6 +412,8 @@ class TestSubscriptionEnforcement:
         """
         ns = _ns()
         api_key = _get_default_api_key()
+        oc_token = _get_cluster_token()
+        fresh_key_id = None
         
         # First verify that default key currently gets 403 on premium model (auth fails)
         r = _inference(api_key, path=PREMIUM_MODEL_PATH)
@@ -432,14 +436,29 @@ class TestSubscriptionEnforcement:
             _wait_reconcile()
             
             # Now auth passes (system:authenticated in AuthPolicy) but subscription fails
-            # (premium subscription only allows premium-user, not system:authenticated)
-            r = _poll_status(api_key, 403, path=PREMIUM_MODEL_PATH, timeout=30)
+            # (premium subscription only allows premium-user, not system:authenticated).
+            # The request above cached the default key's subscription lookup; a new key
+            # gets its own cache entries for this policy check.
+            fresh_key_response = _create_api_key_raw(
+                oc_token,
+                name=f"e2e-auth-pass-sub-fail-{uuid.uuid4().hex[:8]}",
+                subscription=SIMULATOR_SUBSCRIPTION,
+            )
+            assert fresh_key_response.status_code in (200, 201), (
+                f"failed to create fresh API key: {fresh_key_response.status_code} "
+                f"{fresh_key_response.text[:300]}"
+            )
+            fresh_key_data = fresh_key_response.json()
+            fresh_key_id = fresh_key_data["id"]
+            r = _poll_status(fresh_key_data["key"], 403, path=PREMIUM_MODEL_PATH)
             log.info(f"Auth passes, subscription fails -> {r.status_code}")
             # Verify the error message indicates subscription issue
             if r.text:
                 assert "subscription" in r.text.lower() or r.status_code == 403, \
                     f"Expected subscription-related 403, got: {r.text[:200]}"
         finally:
+            if fresh_key_id:
+                _revoke_api_key(oc_token, fresh_key_id)
             _delete_cr("maasauthpolicy", "e2e-auth-pass-sub-fail")
             _wait_reconcile()
 
@@ -1198,15 +1217,32 @@ class TestCascadeDeletion:
         fails (no subscriptions found for user) and returns 403 Forbidden before
         the request reaches TokenRateLimitPolicy.
         """
-        api_key = _get_default_api_key()
+        oc_token = _get_cluster_token()
         original = _snapshot_cr("maassubscription", SIMULATOR_SUBSCRIPTION)
         assert original, f"Pre-existing {SIMULATOR_SUBSCRIPTION} not found"
+
+        # Authorino caches the denial below for this key, so mint a dedicated one
+        # instead of the process-cached _get_default_api_key() that later tests use,
+        # and prove it works before deletion so the 403 comes from this test.
+        key_response = _create_api_key_raw(
+            oc_token,
+            name=f"e2e-cascade-delete-{uuid.uuid4().hex[:8]}",
+            subscription=SIMULATOR_SUBSCRIPTION,
+        )
+        assert key_response.status_code in (200, 201), (
+            f"failed to create dedicated API key: {key_response.status_code} "
+            f"{key_response.text[:300]}"
+        )
+        key_data = key_response.json()
+        api_key = key_data["key"]
+        _poll_status(api_key, 200)
         try:
             _delete_cr("maassubscription", SIMULATOR_SUBSCRIPTION)
-            # With no subscription, expect 403 from AuthPolicy subscription validation
-            r = _poll_status(api_key, 403, timeout=30)
+            # With no subscription, expect 403 after the cached lookups expire.
+            r = _poll_status(api_key, 403, timeout=AUTH_CACHE_TIMEOUT)
             log.info(f"No subscriptions -> {r.status_code} (access denied as expected)")
         finally:
+            _revoke_api_key(oc_token, key_data["id"])
             _apply_cr(original)
             _wait_reconcile()
             # Wait for the TRLP to be re-enforced before returning — this confirms the
@@ -2311,9 +2347,16 @@ class TestStatusReporting:
             assert all(trlp.get("ready") for trlp in trlp_statuses), "Expected all TRLPs to be ready"
             log.info("✅ Subscription returned to Active phase with all TRLPs ready")
 
-            # Step 8: Verify inference works (poll to allow Envoy config propagation)
+            # Step 8: Verify inference works after Envoy propagation and the earlier
+            # rejection leaves Authorino's cache.
             log.info("Step 8: Verifying inference works with Active subscription...")
-            resp = _poll_status(api_key, 200, path=TRLP_TEST_MODEL_PATH, model_name=TRLP_TEST_MODEL_ID, timeout=60)
+            resp = _poll_status(
+                api_key,
+                200,
+                path=TRLP_TEST_MODEL_PATH,
+                model_name=TRLP_TEST_MODEL_ID,
+                timeout=AUTH_CACHE_TIMEOUT,
+            )
             assert resp.status_code == 200, f"Expected 200 OK for Active subscription, got {resp.status_code}: {resp.text}"
             log.info("✅ Inference works with Active subscription after Kuadrant recovery")
 
@@ -2642,17 +2685,18 @@ class TestDegradedSubscriptionFiltering:
             assert phase == "Failed", f"Expected Failed phase after patch, got {phase}"
             log.info("✅ Subscription patched to Failed phase")
 
-            # Test inference with Failed subscription - should be rejected by OPA
+            # Test inference with Failed subscription after the Active request's cached
+            # subscription lookup expires.
             log.info("Testing inference with Failed subscription...")
-            r = _inference(api_key, path=MODEL_PATH, model_name=MODEL_NAME)
+            r = _poll_status(
+                api_key,
+                403,
+                path=MODEL_PATH,
+                model_name=MODEL_NAME,
+                timeout=AUTH_CACHE_TIMEOUT,
+            )
 
             log.info(f"Response: status={r.status_code}, body={r.text[:200]}")
-
-            # Failed phase should be rejected by OPA rule (403 or error message)
-            if r.status_code == 200:
-                assert "denied" in r.text.lower() or "access" in r.text.lower(),                     f"Expected access denied message, got: {r.text[:200]}"
-            else:
-                assert r.status_code == 403,                     f"Expected 403 for Failed subscription, got {r.status_code}: {r.text[:200]}"
 
             log.info("✅ Inference with Failed subscription correctly rejected by OPA")
 
