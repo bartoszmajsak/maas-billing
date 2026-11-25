@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
+	"github.com/opendatahub-io/models-as-a-service/maas-api/internal/constant"
 	"github.com/opendatahub-io/models-as-a-service/maas-api/internal/logger"
 	"github.com/opendatahub-io/models-as-a-service/maas-api/internal/models"
 	"github.com/opendatahub-io/models-as-a-service/maas-api/internal/subscription"
@@ -1494,5 +1496,58 @@ func TestListSubscriptionsForModel_NoAccess(t *testing.T) {
 
 	if len(result) != 0 {
 		t.Errorf("expected empty array when user has no access, got %d items", len(result))
+	}
+}
+
+func TestHandler_SelectSubscription_GatewayResponseOmitsUnreadFields(t *testing.T) {
+	subscriptionObject := createTestSubscription("large-sub", []string{"basic-users"}, 10, "org-basic", "cc-basic")
+	modelRefs := make([]any, 0, 20)
+	for index := range 20 {
+		modelRefs = append(modelRefs, map[string]any{
+			"name":            "model-" + strings.Repeat("x", index),
+			"tokenRateLimits": []any{map[string]any{"limit": int64(1000), "window": "1m"}},
+		})
+	}
+	if err := unstructured.SetNestedSlice(subscriptionObject.Object, modelRefs, "spec", "modelRefs"); err != nil {
+		t.Fatalf("failed to set modelRefs: %v", err)
+	}
+	subscriptionObject.SetAnnotations(map[string]string{
+		constant.AnnotationDisplayName: "Large subscription",
+		constant.AnnotationDescription: strings.Repeat("d", 500),
+	})
+
+	router := setupTestRouter(&mockLister{subscriptions: []*unstructured.Unstructured{subscriptionObject}})
+	body, err := json.Marshal(subscription.SelectRequest{Groups: []string{"basic-users"}, Username: "alice"})
+	if err != nil {
+		t.Fatalf("failed to marshal request: %v", err)
+	}
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/subscriptions/select", bytes.NewReader(body)))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+
+	var response map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	for field, want := range map[string]string{
+		"name":           "large-sub",
+		"namespace":      "test-ns",
+		"organizationId": "org-basic",
+		"costCenter":     "cc-basic",
+		"phase":          "Active",
+	} {
+		if response[field] != want {
+			t.Errorf("expected %s %q, got %v", field, want, response[field])
+		}
+	}
+	for _, field := range []string{"displayName", "description", "priority", "modelRefs", "labels"} {
+		if _, found := response[field]; found {
+			t.Errorf("response should omit %s, got %v", field, response[field])
+		}
+	}
+	if recorder.Body.Len() >= 300 {
+		t.Errorf("response should stay under 300 bytes, got %d: %s", recorder.Body.Len(), recorder.Body.String())
 	}
 }

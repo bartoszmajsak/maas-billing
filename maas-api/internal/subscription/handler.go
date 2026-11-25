@@ -170,7 +170,20 @@ func (h *Handler) SelectSubscription(c *gin.Context) {
 		"subscription", response.Name,
 		"organizationId", response.OrganizationID,
 	)
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, gatewaySelectResponse(response))
+}
+
+// gatewaySelectResponse omits fields no gateway AuthPolicy reads. Authorino's
+// evaluator cache silently drops entries over its per-entry size limit, so the
+// model list and descriptive subscription fields must not inflate the response.
+func gatewaySelectResponse(response *SelectResponse) *SelectResponse {
+	trimmed := *response
+	trimmed.DisplayName = ""
+	trimmed.Description = ""
+	trimmed.Priority = 0
+	trimmed.ModelRefs = nil
+	trimmed.Labels = nil
+	return &trimmed
 }
 
 // ListSubscriptions handles GET /v1/subscriptions.

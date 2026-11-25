@@ -322,6 +322,7 @@ func (s *Service) ValidateAPIKey(ctx context.Context, key string) (*ValidationRe
 		Groups:       groups, // Original user groups for subscription-based authorization
 		Subscription: metadata.Subscription,
 		Tenant:       metadata.Tenant,
+		ExpiresAt:    metadata.ExpirationDate,
 	}, nil
 }
 

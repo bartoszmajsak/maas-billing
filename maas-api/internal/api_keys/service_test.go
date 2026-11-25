@@ -1321,3 +1321,29 @@ func TestCreateAPIKey_GroupNameValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateAPIKey_ReturnsExpiry(t *testing.T) {
+	ctx := t.Context()
+	svc, store := createTestService(t)
+
+	expiresAt := time.Now().Add(time.Hour)
+	expiringKey, expiringHash := createTestAPIKey(t)
+	require.NoError(t, store.AddKey(ctx, "alice", "550e8400-e29b-41d4-a716-446655440010", expiringHash,
+		"Expiring Key", "", []string{"tier-basic"}, "default-sub", "", &expiresAt, false))
+	permanentKey, permanentHash := createTestAPIKey(t)
+	require.NoError(t, store.AddKey(ctx, "alice", "550e8400-e29b-41d4-a716-446655440011", permanentHash,
+		"Permanent Key", "", []string{"tier-basic"}, "default-sub", "", nil, false))
+
+	result, err := svc.ValidateAPIKey(ctx, expiringKey)
+	require.NoError(t, err)
+	require.True(t, result.Valid)
+	expiresAtResult, err := time.Parse(time.RFC3339, result.ExpiresAt)
+	require.NoError(t, err, "expiresAt %q", result.ExpiresAt)
+	assert.False(t, expiresAtResult.After(expiresAt), "expiresAt %s is after the key's expiry %s", expiresAtResult, expiresAt)
+	assert.Less(t, expiresAt.Sub(expiresAtResult), time.Second)
+
+	result, err = svc.ValidateAPIKey(ctx, permanentKey)
+	require.NoError(t, err)
+	require.True(t, result.Valid)
+	assert.Empty(t, result.ExpiresAt)
+}

@@ -44,7 +44,10 @@ type ValidationResult struct {
 	Groups       []string `json:"groups,omitempty"`       // User groups for subscription-based authorization
 	Subscription string   `json:"subscription,omitempty"` // MaaSSubscription name from DB (Authorino → subscription-info)
 	Tenant       string   `json:"tenant"`                 // Tenant bound at key creation (always present, empty string for legacy keys)
-	Reason       string   `json:"reason,omitempty"`       // If invalid: "key not found", "revoked", etc.
+	// ExpiresAt is RFC3339 and empty for keys that never expire. Authorino caches
+	// the validation response, so the gateway checks it on every request.
+	ExpiresAt string `json:"expiresAt,omitempty"`
+	Reason    string `json:"reason,omitempty"` // If invalid: "key not found", "revoked", etc.
 }
 
 // PaginationParams holds pagination parameters.
