@@ -346,7 +346,7 @@ sequenceDiagram
     Authorino->>MaaS: POST /internal/v1/subscriptions/select (subscription check)
     MaaS-->>Authorino: Selected subscription
     
-    Authorino->>GatewayAPI: Auth success (cached)
+    Authorino->>GatewayAPI: Auth success
     GatewayAPI->>Limitador: Check TokenRateLimitPolicy
     Limitador-->>GatewayAPI: Within limits
     GatewayAPI->>LLMInferenceService: Forward request

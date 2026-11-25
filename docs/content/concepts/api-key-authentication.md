@@ -91,13 +91,13 @@ sequenceDiagram
     Gateway-->>User: Response
 ```
 
-The validation endpoint (`/internal/v1/api-keys/validate`) is called by Authorino on every request that bears an `sk-oai-*` token. It:
+The validation endpoint (`/internal/v1/api-keys/validate`) is called by Authorino for requests that bear an `sk-oai-*` token. Authorino caches the result per key for up to the metadata cache TTL (60 seconds by default); see [Authorino Caching](../configuration-and-management/authorino-caching.md). It:
 
 1. Hashes the incoming key and looks it up in the database
-2. Returns `valid: true` with `userId`, `groups`, and `subscription` if the key is active and not expired
+2. Returns `valid: true` with `userId`, `groups`, `subscription`, and `expiresAt` if the key is active and not expired. The gateway checks `expiresAt` on every request, so a cached result does not outlive the key
 3. Returns `valid: false` with a reason if the key is invalid, revoked, or expired
 
-After a successful lookup, maas-api asynchronously updates `last_used_at` in the background. To prevent Postgres row-lock contention when many requests share a single key, these writes are **debounced**: at most one write is issued per key per `LAST_USED_DEBOUNCE_SECS` window (default 60 s). Set `LAST_USED_DEBOUNCE_SECS=0` on the maas-api Deployment to write on every validation.
+After a successful lookup, maas-api asynchronously updates `last_used_at` in the background. To prevent Postgres row-lock contention when many requests share a single key, these writes are **debounced**: at most one write is issued per key per `LAST_USED_DEBOUNCE_SECS` window (default 60 s). Set `LAST_USED_DEBOUNCE_SECS=0` on the maas-api Deployment to write on every validation. Validation only runs on a cache miss, so `last_used_at` can trail actual use by up to the cache TTL plus the debounce window.
 
 ---
 

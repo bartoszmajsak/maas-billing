@@ -233,7 +233,7 @@ curl -sS -X DELETE "${MAAS_API_URL}/maas-api/v1/api-keys/${KEY_ID}" \
   -H "Authorization: Bearer $(oc whoami -t)"
 ```
 
-Revocation takes effect immediately (Authorino may cache briefly).
+maas-api rejects the key from the next validation, but the gateway caches validation results, so a revoked key can still be accepted for up to the cache TTL (60 seconds by default). See [Authorino Caching](../configuration-and-management/authorino-caching.md#security-implication-revocation-lag).
 
 ### Revoke All Your Keys
 

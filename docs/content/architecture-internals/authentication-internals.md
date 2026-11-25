@@ -32,7 +32,7 @@ So enforcement is: **subscription resolved in AuthPolicy → same key matched in
 
 ## Identity metadata: groups, `groups_str`, and telemetry
 
-Behavior is split between **`filters.identity`** (what gets serialized onto **`auth.identity`** for downstream consumers) and **`celGroups`** (what the controller uses for subscription selection and cache keys). Both are defined in **`maasauthpolicy_controller.go`**.
+Behavior is split between **`filters.identity`** (what gets serialized onto **`auth.identity`** for downstream consumers) and **`celGroups`** (what the controller uses for subscription selection and, for token identities, the `subscription-info` cache key). Both are defined in **`maasauthpolicy_controller.go`**.
 
 ### API key validation path
 
@@ -49,7 +49,7 @@ TokenReview returns groups on **`status.user.groups`**. Authorino surfaces that 
 
 The controller **does not** define a separate `groups_str` expression that reads TokenReview groups. The **`filters.identity`** fields above still reference **`auth.metadata.apiKeyValidation.groups`** only; without API key metadata those expressions do **not** mirror TokenReview—treat **`groups_str`** (and the sibling **`groups`** property in that same JSON block) as **empty / irrelevant for pure bearer-token auth**.
 
-Subscription selection and caching use the **`celGroups`** CEL constant in the same file: **`auth.metadata.apiKeyValidation.groups`** when API key metadata exists; otherwise **`auth.identity.groups`** if present, else **`auth.identity.user.groups`**. For TokenReview, inspect **`auth.identity.user.groups`**, not `groups_str` from `filters.identity`.
+Subscription selection, and the `subscription-info` cache key for token identities, use the **`celGroups`** CEL constant in the same file: **`auth.metadata.apiKeyValidation.groups`** when API key metadata exists; otherwise **`auth.identity.groups`** if present, else **`auth.identity.user.groups`**. For TokenReview, inspect **`auth.identity.user.groups`**, not `groups_str` from `filters.identity`.
 
 ### OIDC path
 
@@ -65,7 +65,7 @@ TRLP **`when`** predicates match **`auth.identity.selected_subscription_key` onl
 |--------|----------------|---------------------------|------|
 | Raw groups after auth | **`auth.metadata.apiKeyValidation.groups`** | **`auth.identity.user.groups`** (from TokenReview **`status.user.groups`**) | **`auth.identity.groups`** if present, else **`auth.identity.user.groups`** |
 | Serialized **`groups_str` in `filters.identity`** | From **`apiKeyValidation.groups.join(",")`** | Not populated from TokenReview (still tied to apiKeyValidation expression) | Same—only apiKeyValidation drives that JSON property |
-| Subscription selection + Authorino cache inputs | **`celGroups`**, **`celUsername`**, **`celSubscription`** + **`auth.metadata["subscription-info"]`** after select | Same **`celGroups`** branch → **`auth.identity.user.groups`** | **`celGroups`** → **`auth.identity.groups`** when set |
+| Subscription selection + Authorino cache inputs | **`celGroups`**, **`celUsername`**, **`celSubscription`** + **`auth.metadata["subscription-info"]`** after select; the cache key is the key ID, username, bound subscription and model, without groups | Same **`celGroups`** branch → **`auth.identity.user.groups`** | **`celGroups`** → **`auth.identity.groups`** when set |
 | Rate limiting | **`auth.identity.selected_subscription_key`** after successful select | Same | Same |
 
 If you read older notes about a “string trick” solely for TRLP group matching, treat that as **obsolete**.

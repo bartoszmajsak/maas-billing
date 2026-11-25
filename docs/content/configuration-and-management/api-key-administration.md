@@ -17,14 +17,14 @@ curl -sS -X POST "${MAAS_API_URL}/maas-api/v1/api-keys/bulk-revoke" \
   -d '{"username": "alice"}'
 ```
 
-This updates the status of all API keys belonging to the specified user to `revoked` in the database. The next validation request for any of those keys will reject them. Authorino may cache validation results briefly; revocation is effective as soon as the cache expires.
+This updates the status of all API keys belonging to the specified user to `revoked` in the database. The next validation request for any of those keys will reject them. Authorino caches validation results, so a revoked key can still be accepted for up to `--metadata-cache-ttl` seconds (60 by default). See [Authorino Caching](authorino-caching.md#security-implication-revocation-lag) for how to enforce a revocation sooner.
 
 !!! warning "Administrative privilege required"
     Only administrators with appropriate permissions can revoke other users' keys. Regular users can only revoke their own keys via `DELETE /v1/api-keys/{id}`.
 
 ### Use Cases
 
-- **Security incident response**: Immediately cut off access for a compromised account
+- **Security incident response**: Cut off access for a compromised account
 - **User offboarding**: Revoke all keys when a user leaves the organization
 - **Policy enforcement**: Revoke keys that violate usage policies
 
