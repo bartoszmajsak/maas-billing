@@ -38,7 +38,6 @@ spec:
           - --monitoring-namespace=$(MONITORING_NAMESPACE)
           - --enable-tenant-namespace-discovery
           - --metadata-cache-ttl=60
-          - --authz-cache-ttl=60
         env:
           - name: CONTROLLER_NAMESPACE
             valueFrom:

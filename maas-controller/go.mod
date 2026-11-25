@@ -5,6 +5,7 @@ go 1.25.8
 require (
 	github.com/go-logr/logr v1.4.3
 	github.com/kserve/kserve v0.19.0-rc0.0.20260715171408-85065ab905e4
+	github.com/kuadrant/authorino v0.22.0
 	github.com/onsi/gomega v1.41.0
 	github.com/openshift/api v0.0.0-20260317165824-54a3998d81eb
 	github.com/openshift/controller-runtime-common v0.0.0-20260428152732-64ee174f5e2e
@@ -73,6 +74,9 @@ require (
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/stoewer/go-strcase v1.3.1 // indirect
+	github.com/tidwall/gjson v1.18.0 // indirect
+	github.com/tidwall/match v1.1.1 // indirect
+	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xlab/treeprint v1.2.0 // indirect
 	go.opentelemetry.io/otel v1.43.0 // indirect
